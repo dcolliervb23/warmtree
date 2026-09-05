@@ -20,7 +20,7 @@ class ConfigError(Exception):
 class Config:
     size: int = 2
     base: str | None = None  # None means "detect the repo's default branch"
-    dir: str = "../.warmtree"
+    dir: str | None = None  # None means "../.warmtree/<repo name>"
     lockfiles: tuple[str, ...] = ()
     run: tuple[str, ...] = ()
     copy: tuple[str, ...] = ()
@@ -82,7 +82,13 @@ def load(repo_root: Path) -> Config:
 
 
 def pool_dir(repo_root: Path, config: Config) -> Path:
-    """Absolute path of the directory that holds the slots."""
+    """Absolute path of the directory that holds the slots.
+
+    The default is a sibling folder named after the repo, so two repos that
+    share a parent folder never share a pool or a state file.
+    """
+    if config.dir is None:
+        return (repo_root.parent / ".warmtree" / repo_root.name).resolve()
     return (repo_root / config.dir).resolve()
 
 
@@ -99,7 +105,7 @@ def starter_toml(lockfiles: list[str]) -> str:
 [pool]
 size = 2                     # slots to keep ready
 # base = "main"              # branch slots park on; default: repo default branch
-dir = "../.warmtree"         # where slots live, relative to the repo root
+# dir = "../.warmtree/app"   # where slots live; default is ../.warmtree/<repo name>
 lockfiles = {lockfiles_toml}  # re-warm a slot only when one of these changes
 
 [warm]
