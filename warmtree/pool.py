@@ -2,20 +2,23 @@
 
 A slot is a detached git worktree parked on the base branch. The pool
 remembers its slots in one `state.json` inside the pool directory, rewritten
-atomically so a crash mid-write never leaves a half file. Every method that
-changes state holds the pool lock for its whole duration; never call one from
-inside another.
+atomically so a crash mid-write never leaves a half file.
+
+Every change to state happens under the pool lock, but warming does not: a
+slot is marked `warming` under the lock, the slow commands run with the lock
+released so `take` keeps working, and the result is written under the lock
+again. Never call one locked method from inside another.
 """
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from warmtree import git
+from warmtree import git, warm
 from warmtree.config import Config, pool_dir
 from warmtree.lock import FileLock
 
@@ -26,8 +29,11 @@ STATE_VERSION = 1
 # ready:   parked on base, warmed, free to take
 # taken:   a branch is checked out and somebody is working in it
 # warming: `run` commands are executing right now
-# stale:   base or a lockfile moved on since the last warm
+# stale:   the last warm failed; `refresh` will try again
 STATES = ("ready", "taken", "warming", "stale")
+
+# States refresh works on. Warming slots belong to another process.
+REFRESHABLE = ("ready", "stale")
 
 
 class PoolError(Exception):
@@ -44,6 +50,10 @@ class Slot:
     warmed: str | None = None
     lockfiles: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def number(self) -> int:
+        return int(self.name.rsplit("-", 1)[1])
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -52,12 +62,25 @@ class Slot:
         return cls(**data)
 
 
+@dataclass
+class Refreshed:
+    slot: Slot
+    moved: bool  # HEAD moved to a newer base commit
+    rewarmed: bool  # the run commands executed again
+
+
 class Pool:
-    def __init__(self, repo_root: Path, config: Config) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        config: Config,
+        log: Callable[[str], None] | None = None,
+    ) -> None:
         self.repo_root = repo_root
         self.config = config
         self.dir = pool_dir(repo_root, config)
         self.state_path = self.dir / STATE_FILE
+        self.log = log or (lambda message: None)
 
     def base(self) -> str:
         """Branch slots park on: configured, or detected from the repo."""
@@ -90,32 +113,39 @@ class Pool:
     def status(self) -> list[Slot]:
         return self.load_state()
 
+    def _update_slot(self, name: str, **fields: object) -> Slot:
+        """Reload state, change one slot's fields, save. Returns the slot."""
+        with self.locked():
+            slots = self.load_state()
+            slot = _find(slots, name)
+            for key, value in fields.items():
+                setattr(slot, key, value)
+            self.save_state(slots)
+            return slot
+
     # --- lifecycle --------------------------------------------------------
 
     def fill(self) -> list[Slot]:
-        """Create worktrees until `size` slots are waiting. Returns the new ones.
+        """Create and warm slots until `size` are waiting. Returns the new ones.
 
         `size` counts slots that are ready or on their way to ready; taken
         slots do not count, which is what makes a refill after `take` work.
         """
-        with self.locked():
-            slots = self.load_state()
-            base = self.base()
-            created: list[Slot] = []
-            while _waiting(slots) < self.config.size:
+        created: list[Slot] = []
+        while True:
+            with self.locked():
+                slots = self.load_state()
+                if _waiting(slots) >= self.config.size:
+                    return created
                 name = _next_name(slots)
                 path = self.dir / name
-                git.worktree_add_detached(self.repo_root, path, base)
-                now = _now()
-                slot = Slot(
-                    name=name, path=str(path), state="ready", created=now, warmed=now
-                )
+                git.worktree_add_detached(self.repo_root, path, self.base())
+                slot = Slot(name=name, path=str(path), state="warming", created=_now())
                 slots.append(slot)
-                created.append(slot)
-                # Save after every slot so an interrupted fill leaves state
-                # that matches the worktrees that actually exist.
                 self.save_state(slots)
-            return created
+            # Warming can take minutes. The lock is released so take() and
+            # status() keep working while it runs.
+            created.append(self._warm(slot, run=True))
 
     def take(self, branch: str, from_ref: str | None = None) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
@@ -176,6 +206,39 @@ class Pool:
             self.save_state(slots)
             return slot, branch_deleted
 
+    def refresh(self) -> list[Refreshed]:
+        """Bring every waiting slot up to date, one at a time.
+
+        Each slot is moved to the current base commit and its copied files
+        are refreshed. The run commands only execute again when a lockfile
+        hash changed or the slot's last warm failed.
+        """
+        with self.locked():
+            candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
+
+        results = []
+        for name in candidates:
+            with self.locked():
+                slots = self.load_state()
+                slot = _find(slots, name)
+                if slot.state not in REFRESHABLE:
+                    continue  # taken since we looked
+                was_stale = slot.state == "stale"
+                slot.state = "warming"
+                self.save_state(slots)
+                base_commit = git.rev_parse(self.repo_root, self.base())
+
+            path = Path(slot.path)
+            moved = git.rev_parse(path, "HEAD") != base_commit
+            git.reset_to_detached(path, base_commit)
+            lockfiles_changed = (
+                warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
+            )
+            rewarm = was_stale or lockfiles_changed
+            slot = self._warm(slot, run=rewarm)
+            results.append(Refreshed(slot, moved, rewarm))
+        return results
+
     def remove(
         self,
         names: list[str] | None = None,
@@ -203,12 +266,50 @@ class Pool:
             self.save_state([slot for slot in slots if slot not in targets])
             return targets
 
+    # --- warming ----------------------------------------------------------
+
+    def _warm(self, slot: Slot, run: bool) -> Slot:
+        """Copy files, optionally run the commands, record hashes, mark ready.
+
+        Called with the lock released. On failure the slot is marked stale
+        and the error propagates so the caller can report it.
+        """
+        path = Path(slot.path)
+        try:
+            copied = warm.copy_files(
+                self.repo_root, path, self.config.copy, slot.number, self.config.env
+            )
+            for name in copied:
+                self.log(f"{slot.name}: copied {name}")
+            if run:
+                warm.run_commands(
+                    path,
+                    self.config.run,
+                    slot.number,
+                    log=lambda message: self.log(f"{slot.name}: {message}"),
+                )
+        except warm.WarmError:
+            self._update_slot(slot.name, state="stale")
+            raise
+        hashes = warm.hash_lockfiles(path, self.config.lockfiles)
+        warmed = _now() if run else slot.warmed
+        return self._update_slot(
+            slot.name, state="ready", warmed=warmed, lockfiles=hashes
+        )
+
 
 def _checkout(repo_root: Path, path: Path, branch: str, start: str) -> None:
     if git.branch_exists(repo_root, branch):
         git.checkout_branch(path, branch)
     else:
         git.checkout_new_branch(path, branch, start)
+
+
+def _find(slots: list[Slot], name: str) -> Slot:
+    for slot in slots:
+        if slot.name == name:
+            return slot
+    raise PoolError(f"{name} is no longer in the pool")
 
 
 def _find_taken(slots: list[Slot], branch: str) -> Slot:
