@@ -6,8 +6,8 @@ A pool of pre-warmed git worktrees for parallel AI coding agents.
 dependencies, rebuilding caches, copying the `.env` files git does not track.
 On a large repo that cold start is minutes, and with several agents working in
 parallel you pay it several times a day. warmtree keeps a few worktrees already
-checked out and ready, so `warmtree take <branch>` hands you a workspace in
-under a second.
+checked out, warmed, and ready, so `warmtree take <branch>` hands you a
+workspace in under a second.
 
 warmtree owns the **create** and **release** steps only. Everything in between
 is ordinary git, so your editor, hooks, and other worktree tools work on a
@@ -19,14 +19,11 @@ Early. Stable enough to dogfood, not yet on PyPI.
 
 | Works today | Not yet |
 |---|---|
-| `init`, `fill`, `take`, `release`, `remove`, `status` | `refresh` (fast-forward and re-warm slots) |
-| Detached slots parked on the base branch | Running `[warm] run` commands in a slot |
-| File-locked `take`, safe for concurrent agents | Copying `[warm] copy` files and `WARMTREE_SLOT` |
-| Cold-create fallback when the pool is empty | Lockfile hashing to decide when to re-warm |
-| Refill after `take`, foreground or background | `SKILL.md` for agents, PyPI release |
-
-The `[warm]` section of the config is parsed and validated but not acted on
-yet.
+| `init`, `fill`, `take`, `release`, `refresh`, `remove`, `status` | `SKILL.md` for agents |
+| Slots warmed with your own `run` commands and copied `.env` files | PyPI release, `uvx warmtree` |
+| `refresh` fast-forwards slots and re-warms only when a lockfile changed | |
+| File-locked `take`, safe for concurrent agents | |
+| Cold-create fallback when the pool is empty | |
 
 ## Install
 
@@ -53,7 +50,8 @@ Run these from inside the repo you want to pool.
 
 ```sh
 warmtree init          # writes .warmtree.toml with defaults
-warmtree fill          # creates the slots, two by default
+# edit .warmtree.toml: add your install command to [warm] run
+warmtree fill          # creates and warms the slots, two by default
 warmtree status        # see them
 ```
 
@@ -75,21 +73,30 @@ warmtree release feature/login
 `take` prints only the slot path on stdout. Everything else it says goes to
 stderr, so the `cd` idiom works.
 
+Keep slots current with a nightly `warmtree refresh` from cron or Task
+Scheduler, after whatever pulls your base branch.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `warmtree init [--force]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. |
-| `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch. |
+| `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch, with `copy` files copied in and `run` commands executed. |
 | `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Creates `<branch>` there (from `REF` or the base branch) or checks it out if it already exists. Prints the path, then refills the pool. |
 | `warmtree take ... --no-refill` | Skip the refill. |
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. |
+| `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. |
 
-Slot states: `ready` (free to take), `taken` (someone is working in it),
-`warming` and `stale` (reserved for `refresh`, not used yet).
+Slot states:
+
+- `ready`: parked on base, warm, free to take.
+- `taken`: a branch is checked out and someone is working in it.
+- `warming`: `run` commands are executing right now, in `fill` or `refresh`.
+- `stale`: the last warm failed. `refresh` retries it. `take` never hands out a
+  stale slot.
 
 If no slot is ready, `take` falls back to a normal `git worktree add`, tells
 you on stderr, and the new worktree joins the pool as a taken slot. An empty
@@ -98,7 +105,8 @@ pool is a slow path, never an error.
 ## Configuration
 
 `.warmtree.toml` at the repo root. Every key has a default; an empty file or
-no file at all means a pool of two on the repo's default branch.
+no file at all means a pool of two on the repo's default branch with nothing
+to warm.
 
 ```toml
 [pool]
@@ -107,13 +115,24 @@ size = 2                       # slots to keep ready; taken slots do not count
 # dir = "../.warmtree/app"     # where slots live; default: ../.warmtree/<repo name>
 lockfiles = ["package-lock.json", "uv.lock"]  # re-warm only when one of these changes
 
-[warm]                         # parsed today, acted on soon
+[warm]
 run = ["npm ci"]               # commands run inside a slot at fill and refresh time
 copy = [".env", ".env.local"]  # untracked files copied from the main worktree
 env = true                     # write WARMTREE_SLOT=<n> into the copied env files
 ```
 
-Unknown keys are errors, so a typo never silently disables warming.
+Details worth knowing:
+
+- `run` commands go through the shell, in order, inside the slot, with
+  `WARMTREE_SLOT=<n>` in the environment. Output is captured and shown only
+  when a command fails. warmtree has no idea what npm or dotnet are; you do.
+- `copy` paths are relative to the repo root. Files missing from the main
+  worktree are skipped. With `env = true`, copied files named like `.env`,
+  `.env.local`, or `app.env` get a `WARMTREE_SLOT=<n>` line appended, so your
+  project can derive a per-slot port or database name from it.
+- `lockfiles` are hashed inside the slot after each warm. `refresh` re-runs
+  `run` only when a hash differs.
+- Unknown keys are errors, so a typo never silently disables warming.
 
 ## How it works
 
@@ -124,6 +143,10 @@ Unknown keys are errors, so a typo never silently disables warming.
   branch detached and runs `git clean -fd`, which removes untracked files but
   keeps ignored ones. `node_modules`, `.venv`, and friends survive, so the slot
   is still warm for the next take.
+- **Warming never holds the lock.** A slot is marked `warming` under the pool
+  lock, the slow commands run with the lock released, and the result is
+  written under the lock again. A three-minute `npm ci` in one slot never
+  blocks `take` on another.
 - **State is one JSON file with a file lock.** `state.json` lives in the pool
   directory and is rewritten atomically. `take` holds an OS file lock while it
   picks a slot, so two agents calling `take` at the same moment get two
