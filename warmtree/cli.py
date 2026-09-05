@@ -15,6 +15,7 @@ from warmtree import __version__, config, git
 from warmtree.config import CONFIG_NAME, ConfigError
 from warmtree.git import GitError
 from warmtree.pool import Pool, PoolError, Slot
+from warmtree.warm import WarmError
 
 # Lockfiles `init` looks for to pre-fill `lockfiles`. It never guesses `run`.
 KNOWN_LOCKFILES = (
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (GitError, ConfigError, PoolError) as exc:
+    except (GitError, ConfigError, PoolError, WarmError) as exc:
         fail(str(exc))
         return 1
 
@@ -90,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--all", action="store_true", help="delete every slot")
     remove.add_argument("--force", action="store_true", help="delete taken slots too")
     remove.set_defaults(func=cmd_remove)
+
+    refresh = commands.add_parser(
+        "refresh", help="move waiting slots to base and re-warm if lockfiles changed"
+    )
+    refresh.set_defaults(func=cmd_refresh)
 
     status = commands.add_parser("status", help="show every slot")
     status.add_argument("--json", action="store_true", help="print JSON for agents")
@@ -164,6 +170,18 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh(args: argparse.Namespace) -> int:
+    results = _pool().refresh()
+    if not results:
+        print("nothing to refresh")
+        return 0
+    for result in results:
+        base = "moved to base" if result.moved else "at base"
+        warmth = "re-warmed" if result.rewarmed else "still warm"
+        print(f"{result.slot.name}: {base}, {warmth}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     slots = _pool().status()
     if args.json:
@@ -197,7 +215,7 @@ def print_table(slots: list[Slot]) -> None:
 
 def _pool() -> Pool:
     root = git.repo_root(Path.cwd())
-    return Pool(root, config.load(root))
+    return Pool(root, config.load(root), log=note)
 
 
 def _spawn_background_fill(repo_root: Path) -> None:
