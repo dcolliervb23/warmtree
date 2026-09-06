@@ -111,7 +111,14 @@ class Pool:
         os.replace(temp_path, self.state_path)
 
     def status(self) -> list[Slot]:
-        return self.load_state()
+        """Read state under the lock.
+
+        Writers already hold the lock. Reading under it too matters on
+        Windows, where a file open for reading makes the writer's atomic
+        replace fail, and a reader can catch the file mid-replace.
+        """
+        with self.locked():
+            return self.load_state()
 
     def _update_slot(self, name: str, **fields: object) -> Slot:
         """Reload state, change one slot's fields, save. Returns the slot."""

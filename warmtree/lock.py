@@ -10,6 +10,7 @@ descriptor and the process deadlocks with itself.
 """
 
 import sys
+import time
 from pathlib import Path
 from types import TracebackType
 
@@ -29,14 +30,15 @@ class FileLock:
         self._file = open(self.path, "a+")  # noqa: SIM115 - closed in __exit__
         if sys.platform == "win32":
             self._file.seek(0)
-            # LK_LOCK retries for about ten seconds and then raises OSError.
-            # Keep asking until we get it; the caller wants to wait, not fail.
+            # The blocking variant retries once a second, which is too slow
+            # for callers such as status polling. Try without blocking and
+            # sleep briefly between attempts until the lock is ours.
             while True:
                 try:
-                    msvcrt.locking(self._file.fileno(), msvcrt.LK_LOCK, 1)
+                    msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:
-                    continue
+                    time.sleep(0.01)
         else:
             fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
         return self
