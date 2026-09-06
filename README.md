@@ -73,7 +73,8 @@ Scheduler, after whatever pulls your base branch.
 
 | Command | What it does |
 |---|---|
-| `warmtree init [--force]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. |
+| `warmtree init [--force] [--no-skill]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. Installs the agent skill for any coding agent it detects. |
+| `warmtree skill [--tool T] [--force]` | Install or refresh the agent skill in the tool folders this repo uses, or in the ones named with `--tool`. Never overwrites an edited copy without `--force`. |
 | `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch, with `copy` files copied in and `run` commands executed. |
 | `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Creates `<branch>` there (from `REF` or the base branch) or checks it out if it already exists. Prints the path, then refills the pool. |
 | `warmtree take ... --no-refill` | Skip the refill. |
@@ -133,22 +134,34 @@ Details worth knowing:
 
 ## Using it with coding agents
 
-The `skills/warmtree/SKILL.md` file is an [Agent Skill](https://agentskills.io):
-a short set of instructions an agent loads when the task calls for an isolated
-workspace. It tells the agent to check whether it is already in a slot
-(`warmtree which`), check capacity before fanning out (`warmtree size`), take
-a slot instead of running `git worktree add`, and release it when the branch
-is merged.
+warmtree ships an [Agent Skill](https://agentskills.io): a short set of
+instructions an agent loads when the task calls for an isolated workspace. It
+tells the agent to check whether it is already in a slot (`warmtree which`),
+check capacity before fanning out (`warmtree size`), take a slot instead of
+running `git worktree add`, and release it when the branch is merged.
 
-Install it for Claude Code, for one project or for every project:
+`warmtree init` installs it automatically wherever it sees signs of a coding
+agent in the repo, and prints each path it wrote:
+
+| Found in the repo | Skill installed at |
+|---|---|
+| `CLAUDE.md` or `.claude/` | `.claude/skills/warmtree/SKILL.md` (Claude Code) |
+| `.github/copilot-instructions.md` | `.github/skills/warmtree/SKILL.md` (GitHub Copilot) |
+| `AGENTS.md` or `.agents/` | `.agents/skills/warmtree/SKILL.md` (Codex and others) |
+| `.cursor/` | `.cursor/skills/warmtree/SKILL.md` (Cursor) |
+
+Commit those folders so every agent on the project gets the skill. To install
+for a tool that was not detected, or to refresh the copies after upgrading
+warmtree:
 
 ```sh
-mkdir -p .claude/skills && cp -r skills/warmtree .claude/skills/     # this project
-mkdir -p ~/.claude/skills && cp -r skills/warmtree ~/.claude/skills/ # all projects
+warmtree skill --tool claude        # claude, copilot, codex, or cursor; repeatable
+warmtree skill                      # re-detect and refresh
+warmtree skill --force              # replace a copy you edited by hand
 ```
 
-Other agents that read the Agent Skills format take the same folder in their
-own skills directory.
+A copy you have edited is never overwritten without `--force`. Pass
+`--no-skill` to `init` to skip all of this.
 
 If your project uses an `AGENTS.md` instead, this paragraph is enough:
 
