@@ -5,6 +5,7 @@ two slots parked on the repo's default branch with nothing to warm.
 """
 
 import json
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,32 @@ def load(repo_root: Path) -> Config:
     if not path.exists():
         return Config()
     return parse(path.read_text(encoding="utf-8"))
+
+
+# The `size = N` line in [pool]. Only the digits are replaced so comments
+# and spacing on that line survive.
+_SIZE_LINE = re.compile(r"^(\s*size\s*=\s*)\d+", re.MULTILINE)
+
+
+def write_size(repo_root: Path, size: int) -> Path:
+    """Set [pool] size in the config file, creating the file if needed.
+
+    Edits one line in place rather than regenerating the file, so the user's
+    comments and other keys are untouched. Returns the config path.
+    """
+    if size < 0:
+        raise ConfigError("size must be zero or more")
+    path = repo_root / CONFIG_NAME
+    text = path.read_text(encoding="utf-8") if path.exists() else starter_toml([])
+    if _SIZE_LINE.search(text):
+        text = _SIZE_LINE.sub(rf"\g<1>{size}", text, count=1)
+    elif "[pool]" in text:
+        text = text.replace("[pool]", f"[pool]\nsize = {size}", 1)
+    else:
+        text = f"[pool]\nsize = {size}\n\n" + text
+    parse(text)  # never write a file we cannot read back
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def pool_dir(repo_root: Path, config: Config) -> Path:
