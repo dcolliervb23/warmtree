@@ -9,5 +9,3 @@ Append here instead of expanding DESIGN.md.
 - **`refresh --fetch`.** `refresh` moves slots to the local base tip. It could
   run `git fetch` first, or accept `base = "origin/main"`, which already works
   because the base is resolved with `rev-parse`.
-- **Trim the pool.** A cold-created slot joins the pool, so a drained pool can
-  grow past `size`. Nothing shrinks it back except `remove`.

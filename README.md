@@ -15,15 +15,8 @@ pooled worktree unchanged.
 
 ## Status
 
-Early. Stable enough to dogfood, not yet on PyPI.
-
-| Works today | Not yet |
-|---|---|
-| `init`, `fill`, `take`, `release`, `refresh`, `remove`, `status` | `SKILL.md` for agents |
-| Slots warmed with your own `run` commands and copied `.env` files | PyPI release, `uvx warmtree` |
-| `refresh` fast-forwards slots and re-warms only when a lockfile changed | |
-| File-locked `take`, safe for concurrent agents | |
-| Cold-create fallback when the pool is empty | |
+Early. Stable enough to dogfood. Not yet on PyPI; the publish workflow is in
+place and the first release will follow a week of daily use.
 
 ## Install
 
@@ -87,6 +80,8 @@ Scheduler, after whatever pulls your base branch.
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. |
 | `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
+| `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
+| `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. |
 
@@ -132,7 +127,51 @@ Details worth knowing:
   project can derive a per-slot port or database name from it.
 - `lockfiles` are hashed inside the slot after each warm. `refresh` re-runs
   `run` only when a hash differs.
+- `warmtree size N` edits the `size` line in place. Your comments and other
+  keys are left alone.
 - Unknown keys are errors, so a typo never silently disables warming.
+
+## Using it with coding agents
+
+The `skills/warmtree/SKILL.md` file is an [Agent Skill](https://agentskills.io):
+a short set of instructions an agent loads when the task calls for an isolated
+workspace. It tells the agent to check whether it is already in a slot
+(`warmtree which`), check capacity before fanning out (`warmtree size`), take
+a slot instead of running `git worktree add`, and release it when the branch
+is merged.
+
+Install it for Claude Code, for one project or for every project:
+
+```sh
+mkdir -p .claude/skills && cp -r skills/warmtree .claude/skills/     # this project
+mkdir -p ~/.claude/skills && cp -r skills/warmtree ~/.claude/skills/ # all projects
+```
+
+Other agents that read the Agent Skills format take the same folder in their
+own skills directory.
+
+If your project uses an `AGENTS.md` instead, this paragraph is enough:
+
+> This repo has a warmtree pool. When you need an isolated workspace, run
+> `warmtree take <branch>` and `cd` into the printed path instead of
+> `git worktree add`. Run `warmtree which` first to see if you are already in
+> a slot, and `warmtree size` to check how many are ready before starting
+> parallel work. When the branch is merged, run `warmtree release <branch>`.
+
+Claude Code's built-in worktree feature is not intercepted. The skill is the
+integration.
+
+## With worktrunk
+
+[worktrunk](https://github.com/max-sixty/worktrunk) covers the rest of the
+worktree lifecycle: hooks, port allocation, cleanup of merged branches. The two
+fit together because warmtree only touches create and release.
+
+- Use `warmtree take` instead of `wt switch --create` to get a warm checkout.
+- Inside the slot, worktrunk's commands work as they do in any worktree.
+- When the branch is merged, run `warmtree release <branch>` rather than
+  worktrunk's remove, so the slot goes back to the pool instead of being
+  deleted.
 
 ## How it works
 
@@ -158,16 +197,6 @@ The pool directory defaults to a sibling of your repo named after it, for
 example `~/dev/.warmtree/myapp/slot-1`, so repos that share a parent folder
 never share a pool.
 
-## Using it with coding agents
-
-Tell your agent to prefer `warmtree take` over `git worktree add`. Until the
-`SKILL.md` ships, a line like this in your `CLAUDE.md` or `AGENTS.md` works:
-
-> When you need an isolated workspace, run `warmtree take <branch>` and `cd`
-> into the printed path instead of `git worktree add`. When the work is merged,
-> run `warmtree release <branch>`. Use `warmtree status --json` to check for a
-> ready slot.
-
 ## Development
 
 ```sh
@@ -179,6 +208,22 @@ uv run ruff format --check .
 
 Tests create real temporary git repos; nothing about git is mocked. CI runs on
 Ubuntu and Windows.
+
+### Releasing
+
+Releases go to PyPI through GitHub Actions trusted publishing; no API token is
+stored anywhere. One-time setup on pypi.org: add a trusted publisher for owner
+`dcolliervb23`, repository `warmtree`, workflow `publish.yml`, environment
+`pypi`. Then:
+
+```sh
+uv version 0.1.0            # sets the version in pyproject.toml
+git commit -am "chore: release 0.1.0"
+git tag v0.1.0
+git push && git push --tags
+```
+
+The workflow refuses to publish if the tag and the package version disagree.
 
 ## License
 
