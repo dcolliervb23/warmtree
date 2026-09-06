@@ -239,6 +239,27 @@ class Pool:
             results.append(Refreshed(slot, moved, rewarm))
         return results
 
+    def trim(self) -> list[Slot]:
+        """Remove waiting slots beyond `size`, highest number first.
+
+        Taken slots are never touched, and slots another process is warming
+        are left alone. Returns the slots removed.
+        """
+        with self.locked():
+            slots = self.load_state()
+            surplus = _waiting(slots) - self.config.size
+            candidates = sorted(
+                (slot for slot in slots if slot.state in REFRESHABLE),
+                key=lambda slot: slot.number,
+                reverse=True,
+            )
+            removed = candidates[: max(surplus, 0)]
+            for slot in removed:
+                git.worktree_remove(self.repo_root, Path(slot.path))
+                slots.remove(slot)
+            self.save_state(slots)
+            return removed
+
     def remove(
         self,
         names: list[str] | None = None,
