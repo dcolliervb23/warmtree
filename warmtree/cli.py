@@ -8,6 +8,7 @@ import argparse
 import json
 import subprocess
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -97,6 +98,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     refresh.set_defaults(func=cmd_refresh)
 
+    size = commands.add_parser("size", help="show or change how many slots to keep")
+    size.add_argument(
+        "size", nargs="?", type=int, help="new size; grows or shrinks the pool to match"
+    )
+    size.set_defaults(func=cmd_size)
+
+    which = commands.add_parser(
+        "which", help="name the slot the current directory is in"
+    )
+    which.set_defaults(func=cmd_which)
+
     status = commands.add_parser("status", help="show every slot")
     status.add_argument("--json", action="store_true", help="print JSON for agents")
     status.set_defaults(func=cmd_status)
@@ -180,6 +192,37 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         warmth = "re-warmed" if result.rewarmed else "still warm"
         print(f"{result.slot.name}: {base}, {warmth}")
     return 0
+
+
+def cmd_size(args: argparse.Namespace) -> int:
+    root = git.repo_root(Path.cwd())
+    if args.size is not None:
+        config.write_size(root, args.size)
+        pool = Pool(root, config.load(root), log=note)
+        for slot in pool.trim():
+            print(f"removed {slot.name}")
+        for slot in pool.fill():
+            print(f"created {slot.name} at {slot.path}")
+    cfg = config.load(root)
+    counts = Counter(slot.state for slot in Pool(root, cfg).status())
+    print(f"size: {cfg.size}")
+    print(
+        f"ready {counts['ready']}, taken {counts['taken']}, "
+        f"warming {counts['warming']}, stale {counts['stale']}; "
+        f"{counts.total()} slots in total"
+    )
+    return 0
+
+
+def cmd_which(args: argparse.Namespace) -> int:
+    here = Path.cwd().resolve()
+    for slot in _pool().status():
+        path = Path(slot.path).resolve()
+        if here == path or path in here.parents:
+            print(f"{slot.name} {slot.state} {slot.branch or '-'}")
+            return 0
+    fail("not inside a warmtree slot")
+    return 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
