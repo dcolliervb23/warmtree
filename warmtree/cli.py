@@ -12,7 +12,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from warmtree import __version__, config, git
+from warmtree import __version__, config, git, skill
 from warmtree.config import CONFIG_NAME, ConfigError
 from warmtree.git import GitError
 from warmtree.pool import Pool, PoolError, Slot
@@ -64,7 +64,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = commands.add_parser("init", help=f"write a starter {CONFIG_NAME}")
     init.add_argument("--force", action="store_true", help="overwrite an existing file")
+    init.add_argument(
+        "--no-skill", action="store_true", help="do not install the agent skill"
+    )
     init.set_defaults(func=cmd_init)
+
+    skill_cmd = commands.add_parser(
+        "skill", help="install the agent skill where this repo's coding agents look"
+    )
+    skill_cmd.add_argument(
+        "--tool",
+        action="append",
+        choices=skill.TOOL_KEYS,
+        help="install for this tool even if it was not detected; repeatable",
+    )
+    skill_cmd.add_argument(
+        "--force", action="store_true", help="overwrite a copy that was edited"
+    )
+    skill_cmd.set_defaults(func=cmd_skill)
 
     fill = commands.add_parser("fill", help="create any missing slots")
     fill.set_defaults(func=cmd_fill)
@@ -128,7 +145,42 @@ def cmd_init(args: argparse.Namespace) -> int:
     if lockfiles:
         print(f"lockfiles: {', '.join(lockfiles)}")
     print("edit [warm] run to add your install command; warmtree never guesses it")
+    if not args.no_skill:
+        targets = skill.detect(root)
+        if targets:
+            _report_skill(root, skill.install(root, targets))
+        else:
+            print(
+                "no agent config detected; install the skill later with "
+                f"`warmtree skill --tool {'|'.join(skill.TOOL_KEYS)}`"
+            )
     return 0
+
+
+def cmd_skill(args: argparse.Namespace) -> int:
+    root = git.repo_root(Path.cwd())
+    if args.tool:
+        targets = [skill.by_tool(key) for key in args.tool]
+    else:
+        targets = skill.detect(root)
+    if not targets:
+        fail(
+            "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
+            "copilot-instructions.md); "
+            f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
+        )
+        return 1
+    results = skill.install(root, targets, force=args.force)
+    _report_skill(root, results)
+    return 0
+
+
+def _report_skill(root: Path, results: list[skill.Installed]) -> None:
+    for result in results:
+        where = result.path.relative_to(root).as_posix()
+        print(f"{result.action}: {result.target.tool} skill at {where}")
+    if any(result.action == "kept" for result in results):
+        note("a copy you edited was kept; use `warmtree skill --force` to replace it")
 
 
 def cmd_fill(args: argparse.Namespace) -> int:
