@@ -213,14 +213,25 @@ never share a pool.
 ## Development
 
 ```sh
-uv sync
-uv run pytest -q
+uv sync                        # creates .venv with Python 3.12, pytest, ruff
+uv run pytest -q               # the whole suite, about a minute
 uv run ruff check .
 uv run ruff format --check .
 ```
 
-Tests create real temporary git repos; nothing about git is mocked. CI runs on
-Ubuntu and Windows.
+Those three commands are exactly what CI runs on Ubuntu and Windows. Tests
+create real temporary git repos; nothing about git is mocked, so `git` must
+be on your PATH.
+
+Useful variations:
+
+```sh
+uv run pytest -q tests/test_lifecycle.py   # one file
+uv run pytest -q -k concurrent             # tests whose name matches
+uv run pytest -x                           # stop at the first failure
+uv run pytest -v                           # show every test name
+uv run ruff format .                       # fix formatting instead of checking
+```
 
 ### Releasing
 
