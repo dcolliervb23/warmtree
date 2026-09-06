@@ -9,14 +9,19 @@ parallel you pay it several times a day. warmtree keeps a few worktrees already
 checked out, warmed, and ready, so `warmtree take <branch>` hands you a
 workspace in under a second.
 
+![warmtree demo](docs/demo.gif)
+
+Measured on a private TypeScript app (457 packages, 664 MB of node_modules):
+a cold `git worktree add` + `npm ci` took 6.6 s even with a fast machine and
+network; `warmtree take` handed over a warm slot in 0.15 s.
+
 warmtree owns the **create** and **release** steps only. Everything in between
 is ordinary git, so your editor, hooks, and other worktree tools work on a
 pooled worktree unchanged.
 
 ## Status
 
-Early. Stable enough to dogfood. Not yet on PyPI; the publish workflow is in
-place and the first release will follow a week of daily use.
+Early. Stable enough to dogfood, and dogfooded daily on a large private repo.
 
 ## Install
 
@@ -34,7 +39,7 @@ Or straight from GitHub:
 uv tool install git+https://github.com/dcolliervb23/warmtree
 ```
 
-Once published, `uvx warmtree` will work on a machine with nothing but Python
+Or from PyPI: `uvx warmtree` works on a machine with nothing but Python
 and git.
 
 ## Quick start
