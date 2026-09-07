@@ -12,3 +12,8 @@ Append here instead of expanding DESIGN.md.
 - **A real docs site.** The README is the documentation for now, on
   purpose. If warmtree grows an audience, split command reference and
   workflows into docs/ and keep the README as the pitch plus quick start.
+- **Warn when `fill` warms nothing.** With the init default `run = []`, slots
+  come up without dependencies and a sub-second `take` buys little. `init`
+  guessing `run` from lockfiles is decided against (it never guesses), but
+  `fill` could print a one-line hint when `run` is empty and a known lockfile
+  is present. From dogfooding, 2026-09-07.
