@@ -6,11 +6,26 @@ copies the skill where that tool will find it. A copy the user has edited is
 never overwritten without --force.
 """
 
+import hashlib
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
 SKILL_NAME = "warmtree"
+
+# sha256 of every SKILL.md this package has ever shipped, oldest first.
+# Append the new hash whenever SKILL.md changes. A copy on disk that matches
+# any of these is an unedited install of some past version, so a refresh may
+# overwrite it without --force. A copy matching none of them was edited by
+# the user and is kept.
+SHIPPED_SKILL_HASHES = (
+    "854d4ee963af2fc0636a1574d7d615a6d3d4a54fcb21b809076c1b30f5460bc0",  # v0.1.0
+    "498d5df8ad3d4e408bafa06598a5114a8711e1a5a0b574309e6da15292c971b6",
+)
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -72,7 +87,8 @@ def install(
     """Copy the skill into each target's skills folder.
 
     written: the file did not exist. current: identical copy already there.
-    kept: a different copy exists and force is off. updated: force overwrote it.
+    updated: an unedited copy of a past version, or --force, was overwritten.
+    kept: a copy the user edited exists and force is off.
     """
     text = skill_text()
     results = []
@@ -80,12 +96,14 @@ def install(
         path = repo_root / target.skills_dir / SKILL_NAME / "SKILL.md"
         if not path.exists():
             action = "written"
-        elif path.read_text(encoding="utf-8") == text:
-            action = "current"
-        elif force:
-            action = "updated"
         else:
-            action = "kept"
+            existing = path.read_text(encoding="utf-8")
+            if existing == text:
+                action = "current"
+            elif force or _sha256(existing) in SHIPPED_SKILL_HASHES:
+                action = "updated"
+            else:
+                action = "kept"
         if action in ("written", "updated"):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
