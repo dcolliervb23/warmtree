@@ -9,3 +9,6 @@ Append here instead of expanding DESIGN.md.
 - **`refresh --fetch`.** `refresh` moves slots to the local base tip. It could
   run `git fetch` first, or accept `base = "origin/main"`, which already works
   because the base is resolved with `rev-parse`.
+- **A real docs site.** The README is the documentation for now, on
+  purpose. If warmtree grows an audience, split command reference and
+  workflows into docs/ and keep the README as the pitch plus quick start.
