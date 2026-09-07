@@ -37,8 +37,12 @@ Prints the configured size and counts, for example:
 
 ```
 size: 2
-ready 1, taken 1, warming 0, stale 0; 2 slots in total
+ready 2, taken 1, warming 0, stale 0; 3 slots in total
 ```
+
+`size` counts the slots kept ready. A taken slot does not count against it,
+so a pool with branches in flight holds more than `size` worktrees until they
+are released; that is normal.
 
 Decide with this rule:
 
