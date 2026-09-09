@@ -1,0 +1,12 @@
+# warmtree config. Every key has a default; delete a line to use it.
+
+[pool]
+size = 2                     # slots to keep ready
+# base = "main"              # branch slots park on; default: repo default branch
+# dir = "../.warmtree/app"   # where slots live; default is ../.warmtree/<repo name>
+lockfiles = ["uv.lock"]  # re-warm a slot only when one of these changes
+
+[warm]
+run = ["uv sync"]            # run inside a slot at fill and refresh
+copy = []                    # untracked files copied from the main repo, e.g. [".env"]
+env = true                   # write WARMTREE_SLOT=<n> into the copied env files
