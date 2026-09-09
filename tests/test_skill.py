@@ -87,6 +87,30 @@ def test_install_keeps_an_edited_copy_unless_forced(tmp_path: Path):
     assert first.path.read_text(encoding="utf-8") == skill.skill_text()
 
 
+def test_install_refreshes_an_unedited_copy_of_a_past_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = skill.by_tool("claude")
+    [first] = skill.install(tmp_path, [target])
+    old_text = "the skill as some earlier release shipped it\n"
+    first.path.write_text(old_text, encoding="utf-8")
+    monkeypatch.setattr(
+        skill,
+        "SHIPPED_SKILL_HASHES",
+        skill.SHIPPED_SKILL_HASHES + (skill._sha256(old_text),),
+    )
+
+    [result] = skill.install(tmp_path, [target])
+    assert result.action == "updated"
+    assert first.path.read_text(encoding="utf-8") == skill.skill_text()
+
+
+def test_bundled_skill_hash_is_recorded():
+    # Fails when SKILL.md changes without appending the new hash, which would
+    # make every installed copy of it look user-edited and never refresh.
+    assert skill._sha256(skill.skill_text()) == skill.SHIPPED_SKILL_HASHES[-1]
+
+
 # --- through the CLI ------------------------------------------------------
 
 
