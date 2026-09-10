@@ -22,3 +22,11 @@ Append here instead of expanding DESIGN.md.
   `/skills reload`; Codex: restart only). `init` and `skill` could print one
   line telling the user a running session needs a restart or skill reload to
   see the new skill. Keep it vague enough not to go stale with tool renames.
+- **Relative size: `warmtree size +2` / `size -1`.** Agents and humans both
+  have to read the current size and do arithmetic before growing the pool for
+  a fan-out; relative syntax removes the round trip.
+- **Autogrow on cold take, with a cap.** A config like `autogrow = 2` bumping
+  size whenever take falls back cold only ever ratchets up, each step costing
+  a full node_modules on disk. Needs `max_size`, and shrinking back toward
+  the configured size edges into daemon territory. Cold fallback plus the
+  skill telling agents to grow before fanning out covers most of it today.
