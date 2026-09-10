@@ -17,3 +17,8 @@ Append here instead of expanding DESIGN.md.
   guessing `run` from lockfiles is decided against (it never guesses), but
   `fill` could print a one-line hint when `run` is empty and a known lockfile
   is present. From dogfooding, 2026-09-07.
+- **Hint at session reload after skill install.** Skills are scanned at
+  agent session start (Claude Code: `/reload-plugins`; Copilot CLI:
+  `/skills reload`; Codex: restart only). `init` and `skill` could print one
+  line telling the user a running session needs a restart or skill reload to
+  see the new skill. Keep it vague enough not to go stale with tool renames.
