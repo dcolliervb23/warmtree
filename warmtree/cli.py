@@ -39,6 +39,9 @@ KNOWN_LOCKFILES = (
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    if not (sys.argv[1:] if argv is None else argv):
+        parser.print_help()
+        return 2
     args = parser.parse_args(argv)
     try:
         return args.func(args)
