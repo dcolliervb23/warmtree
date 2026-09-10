@@ -30,3 +30,14 @@ Append here instead of expanding DESIGN.md.
   a full node_modules on disk. Needs `max_size`, and shrinking back toward
   the configured size edges into daemon territory. Cold fallback plus the
   skill telling agents to grow before fanning out covers most of it today.
+- **`adopt <path>`: fold an existing worktree into the pool.** Registers a
+  hand-made worktree as a taken slot (moving it into the pool dir with
+  `git worktree move`, opt-in and one at a time), so a later `release`
+  recycles its warm dependencies instead of the user deleting them. The
+  onboarding story for repos mid-development. PR-aware cleanup of non-pool
+  worktrees stays out: forge APIs, and it is worktrunk's job.
+- **`release --merged`: sweep taken slots whose branch is merged.** The same
+  local `git branch -d` test release already uses, applied across the pool.
+  Cleanup confined to worktrees warmtree owns, no forge APIs.
+- **README FAQ: onboarding an existing repo.** The pool is additive; old
+  worktrees age out naturally. Say so explicitly for mid-development users.
