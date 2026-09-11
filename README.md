@@ -263,6 +263,28 @@ uv run pytest -v                           # show every test name
 uv run ruff format .                       # fix formatting instead of checking
 ```
 
+### Trying a feature branch
+
+`uvx --from` runs any ref in a throwaway environment, so you can dogfood an
+unmerged branch on a real repo without touching your installed warmtree:
+
+```sh
+uvx --from git+https://github.com/dcolliervb23/warmtree@feat/adopt warmtree status
+```
+
+An alias keeps it readable while a branch is under test:
+
+```sh
+alias wtnext='uvx --from git+https://github.com/dcolliervb23/warmtree@feat/adopt warmtree'
+wtnext adopt ../myrepo-feature-x
+```
+
+There is nothing to switch back: plain `warmtree` was never touched, and the
+alias dies with the shell. The environment is cached per ref, so after new
+pushes to the branch add `--refresh` to pick them up. Both versions read the
+same `.warmtree.toml` and pool state, which is the point — you are testing
+the new code against your real pool.
+
 ### Releasing
 
 Releases go to PyPI through GitHub Actions trusted publishing; no API token is
