@@ -24,6 +24,8 @@ warmtree = "warmtree.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/dcolliervb23/warmtree"
+Changelog = "https://github.com/dcolliervb23/warmtree/releases"
+Issues = "https://github.com/dcolliervb23/warmtree/issues"
 
 [build-system]
 requires = ["hatchling"]
