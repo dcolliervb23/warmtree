@@ -14,6 +14,11 @@ def test_version_flag(capsys: pytest.CaptureFixture[str]):
     assert __version__ in capsys.readouterr().out
 
 
+def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]):
+    assert main([]) == 2
+    assert "usage: warmtree" in capsys.readouterr().out
+
+
 def test_init_writes_starter_config_with_detected_lockfiles(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ):
