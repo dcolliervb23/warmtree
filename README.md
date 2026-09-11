@@ -269,14 +269,14 @@ uv run ruff format .                       # fix formatting instead of checking
 unmerged branch on a real repo without touching your installed warmtree:
 
 ```sh
-uvx --from git+https://github.com/dcolliervb23/warmtree@feat/adopt warmtree status
+uvx --from git+https://github.com/dcolliervb23/warmtree@some-branch warmtree status
 ```
 
 An alias keeps it readable while a branch is under test:
 
 ```sh
-alias wtnext='uvx --from git+https://github.com/dcolliervb23/warmtree@feat/adopt warmtree'
-wtnext adopt ../myrepo-feature-x
+alias wtnext='uvx --from git+https://github.com/dcolliervb23/warmtree@some-branch warmtree'
+wtnext status
 ```
 
 There is nothing to switch back: plain `warmtree` was never touched, and the

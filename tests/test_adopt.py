@@ -6,6 +6,7 @@ import pytest
 
 from tests.conftest import git as run_git
 from warmtree import git
+from warmtree.cli import main
 from warmtree.config import Config
 from warmtree.pool import Pool, PoolError
 
@@ -18,9 +19,13 @@ def hand_made_worktree(repo: Path, branch: str) -> Path:
 
 
 def test_adopt_moves_worktree_into_pool_as_taken(repo: Path):
+    (repo / ".gitignore").write_text("node_modules/\n")
+    run_git("add", ".gitignore", cwd=repo)
+    run_git("commit", "-q", "-m", "ignore dependencies", cwd=repo)
     worktree = hand_made_worktree(repo, "feature")
     (worktree / "node_modules").mkdir()
     (worktree / "node_modules" / "dep.js").write_text("cached\n")
+    assert not git.is_dirty(worktree)  # proves node_modules is truly ignored
 
     pool = Pool(repo, Config(size=1))
     slot = pool.adopt(worktree)
@@ -85,3 +90,20 @@ def test_adopt_refuses_an_existing_slot(repo: Path):
     slot_path = Path(pool.status()[0].path)
     with pytest.raises(PoolError, match="already"):
         pool.adopt(slot_path)
+
+
+def test_adopt_cli_prints_only_the_path_on_stdout(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    worktree = hand_made_worktree(repo, "feature")
+    monkeypatch.chdir(repo)
+    capsys.readouterr()
+
+    assert main(["adopt", str(worktree)]) == 0
+
+    out, err = capsys.readouterr()
+    path = Path(out.strip())
+    assert out.count("\n") == 1
+    assert path.is_dir()
+    assert git.head_branch(path) == "feature"
+    assert "adopted" in err
