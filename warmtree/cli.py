@@ -107,6 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("--force", action="store_true", help="discard changes")
     release.set_defaults(func=cmd_release)
 
+    adopt = commands.add_parser(
+        "adopt", help="move an existing worktree into the pool as a taken slot"
+    )
+    adopt.add_argument("path", help="path of the worktree to adopt")
+    adopt.set_defaults(func=cmd_adopt)
+
     remove = commands.add_parser("remove", help="delete slots")
     remove.add_argument("names", nargs="*", metavar="SLOT", help="slots to delete")
     remove.add_argument("--all", action="store_true", help="delete every slot")
@@ -224,6 +230,15 @@ def cmd_release(args: argparse.Namespace) -> int:
         print(f"deleted branch {args.branch}")
     elif not args.keep_branch:
         note(f"kept branch {args.branch}: it has commits that are not merged")
+    return 0
+
+
+def cmd_adopt(args: argparse.Namespace) -> int:
+    pool = _pool()
+    slot = pool.adopt(Path(args.path))
+    note(f"adopted {args.path} as {slot.name} (branch {slot.branch})")
+    note("editors and shells still open on the old path need repointing")
+    print(slot.path)
     return 0
 
 

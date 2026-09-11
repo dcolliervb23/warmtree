@@ -118,3 +118,8 @@ abandoned.
 | `warmtree release <branch> [--keep-branch] [--force]` | Return a slot. |
 | `warmtree fill` | Create and warm missing slots. |
 | `warmtree refresh` | Fast-forward waiting slots and re-warm if lockfiles changed. |
+| `warmtree adopt <path>` | Move an existing hand-made worktree into the pool as a taken slot. |
+
+`adopt` moves the directory, which breaks anything already open on the old
+path. Only run it when the user asks you to onboard an existing worktree,
+and tell them the new path it prints.
