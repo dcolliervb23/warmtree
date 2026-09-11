@@ -20,7 +20,8 @@ SKILL_NAME = "warmtree"
 # the user and is kept.
 SHIPPED_SKILL_HASHES = (
     "854d4ee963af2fc0636a1574d7d615a6d3d4a54fcb21b809076c1b30f5460bc0",  # v0.1.0
-    "498d5df8ad3d4e408bafa06598a5114a8711e1a5a0b574309e6da15292c971b6",
+    "498d5df8ad3d4e408bafa06598a5114a8711e1a5a0b574309e6da15292c971b6",  # v0.1.1
+    "d9570ba9f2a72ff34534e2610f40c2a477a09dc276bcf8d3cad8be6a0e574dfc",
 )
 
 
