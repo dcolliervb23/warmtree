@@ -213,6 +213,47 @@ class Pool:
             self.save_state(slots)
             return slot, branch_deleted
 
+    def adopt(self, path: Path) -> Slot:
+        """Move an existing worktree into the pool as a taken slot.
+
+        The worktree keeps its branch and everything in its tree, installed
+        dependencies included, so a later `release` recycles it as a warm
+        ready slot instead of the user deleting it. The tree may be dirty;
+        adoption moves it, nothing more. Adoption assumes the tree is warm:
+        its lockfile hashes are recorded as the warm state.
+        """
+        with self.locked():
+            slots = self.load_state()
+            source = path.resolve()
+            if source == self.repo_root.resolve():
+                raise PoolError("cannot adopt the main worktree")
+            for slot in slots:
+                if Path(slot.path).resolve() == source:
+                    raise PoolError(f"{source} is already {slot.name}")
+            if source not in git.worktree_list(self.repo_root):
+                raise PoolError(f"{source} is not a worktree of this repository")
+            branch = git.head_branch(source)
+            if branch is None:
+                raise PoolError(
+                    f"{source} has a detached HEAD; check out a branch first"
+                )
+            name = _next_name(slots)
+            dest = self.dir / name
+            self.dir.mkdir(parents=True, exist_ok=True)
+            git.worktree_move(self.repo_root, source, dest)
+            slot = Slot(
+                name=name,
+                path=str(dest),
+                state="taken",
+                branch=branch,
+                created=_now(),
+                warmed=_now(),
+                lockfiles=warm.hash_lockfiles(dest, self.config.lockfiles),
+            )
+            slots.append(slot)
+            self.save_state(slots)
+            return slot
+
     def refresh(self) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.
 

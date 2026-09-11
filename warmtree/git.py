@@ -144,6 +144,15 @@ def worktree_add_branch(repo: Path, path: Path, branch: str, start: str) -> None
         run(["worktree", "add", "-b", branch, str(path), start], cwd=repo)
 
 
+def worktree_move(repo: Path, path: Path, dest: Path) -> None:
+    """Move a worktree to `dest`, ignored files included.
+
+    Git updates its registration; everything inside the tree, installed
+    dependencies included, travels with the directory.
+    """
+    run(["worktree", "move", str(path), str(dest)], cwd=repo)
+
+
 def worktree_remove(repo: Path, path: Path) -> None:
     """Delete a worktree and its registration, ignored files included."""
     if path.exists():
