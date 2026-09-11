@@ -74,6 +74,30 @@ stderr, so the `cd` idiom works.
 Keep slots current with a nightly `warmtree refresh` from cron or Task
 Scheduler, after whatever pulls your base branch.
 
+## Already have worktrees?
+
+The pool is additive: `init` and `fill` change nothing about worktrees you
+made by hand, and you can start using `take` for your next branch today.
+
+A worktree is a directory with one branch checked out; `git worktree list`
+shows yours. For each directory you want to keep working in, adopt it:
+
+```sh
+warmtree adopt ../myrepo-feature-x
+```
+
+The directory moves into the pool as a taken slot — branch, uncommitted
+changes, and installed dependencies included. Editors and shells still open
+on the old path need repointing; `adopt` prints the new path on stdout, so
+`cd "$(warmtree adopt ../myrepo-feature-x)"` follows the move. When the
+branch is done, `warmtree release` recycles the slot, dependencies intact,
+instead of the tree being deleted.
+
+Branches without a checkout need no onboarding: they are just refs, and
+`warmtree take <branch>` is how they get a workspace from now on. A worktree
+whose branch merged long ago is not worth adopting; delete it and let the
+pool's fresh slots do the work.
+
 ## Commands
 
 | Command | What it does |
@@ -85,6 +109,7 @@ Scheduler, after whatever pulls your base branch.
 | `warmtree take ... --no-refill` | Skip the refill. |
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. |
+| `warmtree adopt <path>` | Move an existing worktree into the pool as a taken slot. Its branch, uncommitted changes, and installed dependencies come with it; a later `release` recycles them. Prints the new path. |
 | `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
