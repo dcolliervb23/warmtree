@@ -154,8 +154,12 @@ def worktree_move(repo: Path, path: Path, dest: Path) -> None:
 
 
 def worktree_remove(repo: Path, path: Path) -> None:
-    """Delete a worktree and its registration, ignored files included."""
-    if path.exists():
+    """Delete a worktree and its registration, ignored files included.
+
+    Targeted removal works even when the directory is already gone. The
+    repo-wide prune is only a fallback for a git too old to accept that.
+    """
+    try:
         run(["worktree", "remove", "--force", str(path)], cwd=repo)
-    else:
+    except GitError:
         run(["worktree", "prune"], cwd=repo)

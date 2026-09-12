@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import git as run_git
+from warmtree import git
 from warmtree.cli import main
 from warmtree.config import Config
 from warmtree.pool import Pool
@@ -32,16 +34,33 @@ def test_missing_directory_is_reported_and_fixed(repo: Path):
     assert pool.doctor() == []
 
 
-def test_stuck_warming_slot_is_reported_and_marked_stale(repo: Path):
+def test_stuck_warming_slot_is_reported_never_repaired(repo: Path):
+    # A warming slot may belong to a live fill or refresh in another
+    # process; changing its state here could start a second warm in the
+    # same directory, so doctor only reports it.
     pool = Pool(repo, Config(size=1))
     [slot] = pool.fill()
     pool._update_slot(slot.name, state="warming")
 
     [finding] = pool.doctor()
     assert "warming" in finding.problem
+    assert "remove" in finding.hint
 
-    pool.doctor(fix=True)
-    assert pool.status()[0].state == "stale"
+    [finding] = pool.doctor(fix=True)
+    assert not finding.fixed
+    assert pool.status()[0].state == "warming"
+
+
+def test_fixing_a_missing_slot_leaves_other_registrations_alone(repo: Path):
+    pool = Pool(repo, Config(size=1))
+    [slot] = pool.fill()
+    other = repo.parent / "hand-made"
+    run_git("worktree", "add", "-q", "--detach", str(other), cwd=repo)
+    shutil.rmtree(slot.path)
+
+    [finding] = pool.doctor(fix=True)
+    assert finding.fixed
+    assert other.resolve() in git.worktree_list(repo)
 
 
 def test_stranger_directory_in_pool_dir_is_reported(repo: Path):

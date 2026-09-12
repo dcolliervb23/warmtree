@@ -348,10 +348,12 @@ class Pool:
     def doctor(self, fix: bool = False) -> list[Finding]:
         """Compare state.json against git and the filesystem, report drift.
 
-        With fix=True the safe repairs are applied: a state entry whose
-        directory is gone is dropped (and git's registration pruned), and a
-        slot stuck in `warming` is marked stale so `refresh` retries it.
-        Everything else is reported with a hint and left alone.
+        With fix=True the one safe repair is applied: a state entry whose
+        directory is gone is removed from git's registration and, once git
+        confirms it is unregistered, dropped from state. Everything else is
+        reported with a hint and left alone: a warming slot may belong to a
+        live fill or refresh in another process, so repairing it here could
+        start a second warm in the same directory.
         """
         findings: list[Finding] = []
         with self.locked():
@@ -362,8 +364,11 @@ class Pool:
             for slot in slots:
                 path = Path(slot.path)
                 if not path.is_dir():
+                    fixed = False
                     if fix:
                         git.worktree_remove(self.repo_root, path)
+                        fixed = path.resolve() not in git.worktree_list(self.repo_root)
+                    if fixed:
                         changed = True
                     else:
                         kept.append(slot)
@@ -371,8 +376,10 @@ class Pool:
                         Finding(
                             slot.name,
                             "directory is gone but the slot is still in state",
-                            fixed=fix,
-                            hint="" if fix else "--fix drops it and prunes git",
+                            fixed=fixed,
+                            hint=""
+                            if fixed
+                            else "--fix removes the registration and drops the slot",
                         )
                     )
                     continue
@@ -387,18 +394,14 @@ class Pool:
                         )
                     )
                 if slot.state == "warming":
-                    if fix:
-                        slot.state = "stale"
-                        changed = True
                     findings.append(
                         Finding(
                             slot.name,
                             "marked warming; fine if a fill or refresh is "
-                            "running, stuck if not",
-                            fixed=fix,
-                            hint=""
-                            if fix
-                            else "--fix marks it stale so refresh retries it",
+                            "running, stuck if that process died",
+                            hint="wait for it to finish; if it is dead, "
+                            f"`warmtree remove {slot.name} --force` "
+                            "and `warmtree fill`",
                         )
                     )
             known = {Path(slot.path).resolve() for slot in kept}
