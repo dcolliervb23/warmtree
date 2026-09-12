@@ -68,6 +68,12 @@ Creates `<branch>` from the base branch, or checks it out if it exists.
 Options:
 
 - `--from <ref>`: start the new branch somewhere other than base.
+- `--scratch` (instead of a branch name): a generated `scratch/<id>` branch
+  for throwaway experiments. The branch name is printed on stderr; release
+  it like any other branch when done.
+- `--json`: print `{"path", "slot", "branch", "cold"}` instead of the bare
+  path, when you are orchestrating rather than cd-ing. `cold` tells you the
+  pool was empty and this take was slow.
 - `--refill-background`: return at once and let the pool refill in a
   detached process. Use this when the user is waiting on you.
 - `--no-refill`: do not refill. Use when you are taking several slots in a
@@ -82,6 +88,16 @@ the user if it keeps happening, and suggest a larger `warmtree size`.
 Inside the slot everything is ordinary git: edit, commit, push, open a pull
 request. Do not delete the slot directory and do not run `git worktree remove`
 on it. The slot belongs to the pool.
+
+For one command in a branch's slot, skip the cd entirely:
+
+```sh
+warmtree exec <branch> -- npm test
+```
+
+It runs in that slot with `WARMTREE_SLOT` set, streams pass through, and the
+exit code is the command's. Do not release a branch while a command is still
+running in its slot.
 
 ## 5. Release when done
 
@@ -114,7 +130,14 @@ abandoned.
 | `warmtree which` | Am I in a slot? |
 | `warmtree size` | Configured size and counts. `warmtree size N` grows or shrinks to N. |
 | `warmtree status [--json]` | Every slot and its state. |
-| `warmtree take <branch> [--from REF] [--refill-background]` | Claim a slot, print its path. |
-| `warmtree release <branch> [--keep-branch] [--force]` | Return a slot. |
+| `warmtree take <branch> [--from REF] [--json] [--refill-background]` | Claim a slot, print its path (or JSON). |
+| `warmtree take --scratch` | Claim a slot on a generated throwaway branch. |
+| `warmtree exec <branch> -- <command...>` | Run one command inside that branch's slot. |
+| `warmtree release <branch> [--keep-branch] [--force] [--json]` | Return a slot. |
 | `warmtree fill` | Create and warm missing slots. |
 | `warmtree refresh` | Fast-forward waiting slots and re-warm if lockfiles changed. |
+| `warmtree adopt <path>` | Move an existing hand-made worktree into the pool as a taken slot. |
+
+`adopt` moves the directory, which breaks anything already open on the old
+path. Only run it when the user asks you to onboard an existing worktree,
+and tell them the new path it prints.
