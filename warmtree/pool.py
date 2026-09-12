@@ -69,6 +69,16 @@ class Refreshed:
     rewarmed: bool  # the run commands executed again
 
 
+@dataclass
+class Finding:
+    """One problem `doctor` found, and what it did or suggests."""
+
+    slot: str | None  # None for problems not tied to a state entry
+    problem: str
+    fixed: bool = False
+    hint: str = ""
+
+
 class Pool:
     def __init__(
         self,
@@ -334,6 +344,79 @@ class Pool:
                 git.worktree_remove(self.repo_root, Path(slot.path))
             self.save_state([slot for slot in slots if slot not in targets])
             return targets
+
+    def doctor(self, fix: bool = False) -> list[Finding]:
+        """Compare state.json against git and the filesystem, report drift.
+
+        With fix=True the safe repairs are applied: a state entry whose
+        directory is gone is dropped (and git's registration pruned), and a
+        slot stuck in `warming` is marked stale so `refresh` retries it.
+        Everything else is reported with a hint and left alone.
+        """
+        findings: list[Finding] = []
+        with self.locked():
+            slots = self.load_state()
+            registered = set(git.worktree_list(self.repo_root))
+            kept: list[Slot] = []
+            changed = False
+            for slot in slots:
+                path = Path(slot.path)
+                if not path.is_dir():
+                    if fix:
+                        git.worktree_remove(self.repo_root, path)
+                        changed = True
+                    else:
+                        kept.append(slot)
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory is gone but the slot is still in state",
+                            fixed=fix,
+                            hint="" if fix else "--fix drops it and prunes git",
+                        )
+                    )
+                    continue
+                kept.append(slot)
+                if path.resolve() not in registered:
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory exists but git does not list it as a worktree",
+                            hint="`git worktree repair` in the main "
+                            "worktree may recover it",
+                        )
+                    )
+                if slot.state == "warming":
+                    if fix:
+                        slot.state = "stale"
+                        changed = True
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "marked warming; fine if a fill or refresh is "
+                            "running, stuck if not",
+                            fixed=fix,
+                            hint=""
+                            if fix
+                            else "--fix marks it stale so refresh retries it",
+                        )
+                    )
+            known = {Path(slot.path).resolve() for slot in kept}
+            if self.dir.is_dir():
+                for child in sorted(self.dir.iterdir()):
+                    if child.is_dir() and child.resolve() not in known:
+                        findings.append(
+                            Finding(
+                                None,
+                                f"{child.name} is in the pool directory but "
+                                "not in state",
+                                hint="delete it, or adopt it if it is a "
+                                "worktree you want",
+                            )
+                        )
+            if changed:
+                self.save_state(kept)
+        return findings
 
     # --- warming ----------------------------------------------------------
 
