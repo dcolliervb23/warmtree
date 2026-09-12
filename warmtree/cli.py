@@ -135,6 +135,17 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("path", help="path of the worktree to adopt")
     adopt.set_defaults(func=cmd_adopt)
 
+    exec_cmd = commands.add_parser(
+        "exec", help="run a command inside the slot holding a branch"
+    )
+    exec_cmd.add_argument("branch", help="branch whose slot to run in")
+    exec_cmd.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        help="command to run, after `--`",
+    )
+    exec_cmd.set_defaults(func=cmd_exec)
+
     remove = commands.add_parser("remove", help="delete slots")
     remove.add_argument("names", nargs="*", metavar="SLOT", help="slots to delete")
     remove.add_argument("--all", action="store_true", help="delete every slot")
@@ -309,6 +320,37 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     note("editors and shells still open on the old path need repointing")
     print(slot.path)
     return 0
+
+
+def cmd_exec(args: argparse.Namespace) -> int:
+    command = args.command
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        fail("nothing to run; usage: warmtree exec <branch> -- <command...>")
+        return 2
+    slot = _pool().taken(args.branch)
+    if not Path(slot.path).is_dir():
+        fail(f"{slot.name} directory is missing; run `warmtree doctor`")
+        return 1
+    env = dict(os.environ)
+    env["WARMTREE_SLOT"] = str(slot.number)
+    # Streams are inherited on purpose: exec is a passthrough, and the
+    # child's output and exit code are the whole point. Like any process
+    # working inside a slot, the child does not pin it; do not release the
+    # branch while a command is still running in its slot.
+    try:
+        completed = subprocess.run(command, cwd=slot.path, env=env)
+    except FileNotFoundError:
+        fail(f"command not found: {command[0]}")
+        return 127
+    except PermissionError:
+        fail(f"not executable: {command[0]}")
+        return 126
+    except OSError as exc:
+        fail(f"cannot run {command[0]}: {exc}")
+        return 1
+    return completed.returncode
 
 
 def cmd_remove(args: argparse.Namespace) -> int:

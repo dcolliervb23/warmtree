@@ -41,3 +41,24 @@ Append here instead of expanding DESIGN.md.
   Cleanup confined to worktrees warmtree owns, no forge APIs.
 - **README FAQ: onboarding an existing repo.** The pool is additive; old
   worktrees age out naturally. Say so explicitly for mid-development users.
+- **Reflink template slots (v0.4+ direction).** One warm template worktree
+  instead of N pre-made slots: `take` registers a fresh worktree the normal
+  cheap way, then clones the template's warm payload (node_modules, .venv,
+  whatever `git clean -ndX` would list) with copy-on-write, and `release`
+  simply deletes the clone. Effectively an infinite pool at roughly one
+  slot's disk cost, and refresh only ever has one template to keep warm.
+  Mechanics: `cp --reflink=always` on XFS/btrfs/ZFS, `cp -c` (clonefile) on
+  APFS; detect support once per pool dir by cloning a probe file and cache
+  the answer in state.json; anywhere unsupported (NTFS), fall back to the
+  classic pool unchanged. Never reflink the whole slot dir: the `.git` file
+  and gitdir links must come from a real `git worktree add`, only the
+  ignored payload is cloned. Open questions: enumerating the payload
+  (config key vs `git clean -ndX`), Windows story (ReFS block cloning is
+  rare on dev machines), and whether release-deletes-clone should retire
+  reset-on-release entirely once the template path exists.
+- **Slot leases.** Nothing stops `release` while a process is working
+  inside a slot: a shell after `cd $(warmtree take x)`, an editor, or
+  `warmtree exec`. The dirty-tree refusal is the only guard. A lease field
+  in state (holder pid + expiry, set by take/exec, checked by release)
+  would close it for every entry point at once; per-command fixes would
+  not. From the exec review, 2026-09-12.
