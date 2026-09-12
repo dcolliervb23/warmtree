@@ -114,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
         "work that does not deserve a name",
     )
     take.add_argument("--from", dest="from_ref", metavar="REF", help="start point")
+    take.add_argument(
+        "--json",
+        action="store_true",
+        help="print a JSON object (path, slot, branch, cold) instead of the path",
+    )
     refill = take.add_mutually_exclusive_group()
     refill.add_argument("--no-refill", action="store_true", help="do not refill")
     refill.add_argument(
@@ -127,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("branch", help="branch currently checked out in the slot")
     release.add_argument("--keep-branch", action="store_true", help="keep the ref")
     release.add_argument("--force", action="store_true", help="discard changes")
+    release.add_argument(
+        "--json",
+        action="store_true",
+        help="print a JSON object (slot, branch, branch_deleted)",
+    )
     release.set_defaults(func=cmd_release)
 
     adopt = commands.add_parser(
@@ -290,7 +300,19 @@ def cmd_take(args: argparse.Namespace) -> int:
         note(f"took {slot.name} for {branch}")
     if args.scratch:
         note(f"scratch branch: {branch}; release it with `warmtree release {branch}`")
-    print(slot.path)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "path": slot.path,
+                    "slot": slot.name,
+                    "branch": branch,
+                    "cold": cold,
+                }
+            )
+        )
+    else:
+        print(slot.path)
 
     if args.refill_background:
         _spawn_background_fill(pool.repo_root)
@@ -305,11 +327,22 @@ def cmd_release(args: argparse.Namespace) -> int:
     slot, branch_deleted = _pool().release(
         args.branch, keep_branch=args.keep_branch, force=args.force
     )
+    if not branch_deleted and not args.keep_branch:
+        note(f"kept branch {args.branch}: it has commits that are not merged")
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "slot": slot.name,
+                    "branch": args.branch,
+                    "branch_deleted": branch_deleted,
+                }
+            )
+        )
+        return 0
     print(f"released {slot.name}")
     if branch_deleted:
         print(f"deleted branch {args.branch}")
-    elif not args.keep_branch:
-        note(f"kept branch {args.branch}: it has commits that are not merged")
     return 0
 
 

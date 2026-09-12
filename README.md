@@ -112,8 +112,9 @@ pool's fresh slots do the work.
 | `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Creates `<branch>` there (from `REF` or the base branch) or checks it out if it already exists. Prints the path, then refills the pool. |
 | `warmtree take --scratch` | Claim a slot on a generated `scratch/<id>` branch, for throwaway work that does not deserve a name. |
 | `warmtree take ... --no-refill` | Skip the refill. |
+| `warmtree take ... --json` | Print a JSON object (`path`, `slot`, `branch`, `cold`) instead of the bare path. |
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
-| `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. |
+| `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. `--json` prints `slot`, `branch`, `branch_deleted`. |
 | `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. Does not pin the slot: do not release a branch while a command still runs in it. |
 | `warmtree adopt <path>` | Move an existing worktree into the pool as a taken slot. Its branch, uncommitted changes, and installed dependencies come with it; a later `release` recycles them. Prints the new path. |
 | `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
