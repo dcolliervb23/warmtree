@@ -68,8 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = commands.add_parser("init", help=f"write a starter {CONFIG_NAME}")
     init.add_argument("--force", action="store_true", help="overwrite an existing file")
-    init.add_argument(
+    init_skill = init.add_mutually_exclusive_group()
+    init_skill.add_argument(
         "--no-skill", action="store_true", help="do not install the agent skill"
+    )
+    init_skill.add_argument(
+        "--user-skill",
+        action="store_true",
+        help="install the agent skill into your home directory instead of "
+        "the repo, so the repo never contains it",
     )
     init.set_defaults(func=cmd_init)
 
@@ -84,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     skill_cmd.add_argument(
         "--force", action="store_true", help="overwrite a copy that was edited"
+    )
+    skill_cmd.add_argument(
+        "--user",
+        action="store_true",
+        help="install into the tools' personal skills folders in your home "
+        "directory instead of the repo, so no repo ever contains the file",
     )
     skill_cmd.set_defaults(func=cmd_skill)
 
@@ -164,42 +177,71 @@ def cmd_init(args: argparse.Namespace) -> int:
     if lockfiles:
         print(f"lockfiles: {', '.join(lockfiles)}")
     print("edit [warm] run to add your install command; warmtree never guesses it")
-    if not args.no_skill:
+    if args.user_skill:
+        home = Path.home()
+        targets = skill.detect_user(home)
+        if targets:
+            _report_skill(home, skill.install(home, targets, user=True), user=True)
+        else:
+            print(
+                "no agent folder found in your home directory; install later "
+                "with e.g. `warmtree skill --user --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
+            )
+    elif not args.no_skill:
         targets = skill.detect(root)
         if targets:
             _report_skill(root, skill.install(root, targets))
         else:
             print(
                 "no agent config detected; install the skill later with "
-                f"`warmtree skill --tool {'|'.join(skill.TOOL_KEYS)}`"
+                "e.g. `warmtree skill --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
     return 0
 
 
 def cmd_skill(args: argparse.Namespace) -> int:
-    root = git.repo_root(Path.cwd())
+    # A user-level install touches only the home directory, so it works
+    # outside any repo and never risks a skill file being committed.
+    root = Path.home() if args.user else git.repo_root(Path.cwd())
     if args.tool:
         targets = [skill.by_tool(key) for key in args.tool]
+    elif args.user:
+        targets = skill.detect_user(root)
     else:
         targets = skill.detect(root)
     if not targets:
-        fail(
-            "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
-            "copilot-instructions.md); "
-            f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
-        )
+        if args.user:
+            fail(
+                "no agent folder found in your home directory "
+                "(.claude, .copilot, .codex, .cursor); pick one with e.g. "
+                "`warmtree skill --user --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
+            )
+        else:
+            fail(
+                "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
+                "copilot-instructions.md); pick one with e.g. "
+                "`warmtree skill --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
+            )
         return 1
-    results = skill.install(root, targets, force=args.force)
-    _report_skill(root, results)
+    results = skill.install(root, targets, force=args.force, user=args.user)
+    _report_skill(root, results, user=args.user)
     return 0
 
 
-def _report_skill(root: Path, results: list[skill.Installed]) -> None:
+def _report_skill(
+    root: Path, results: list[skill.Installed], user: bool = False
+) -> None:
+    prefix = "~/" if user else ""
     for result in results:
         where = result.path.relative_to(root).as_posix()
-        print(f"{result.action}: {result.target.tool} skill at {where}")
+        print(f"{result.action}: {result.target.tool} skill at {prefix}{where}")
     if any(result.action == "kept" for result in results):
-        note("a copy you edited was kept; use `warmtree skill --force` to replace it")
+        flags = "--user --force" if user else "--force"
+        note(f"a copy you edited was kept; use `warmtree skill {flags}` to replace it")
 
 
 def cmd_fill(args: argparse.Namespace) -> int:
