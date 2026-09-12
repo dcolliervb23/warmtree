@@ -104,7 +104,15 @@ def build_parser() -> argparse.ArgumentParser:
     fill.set_defaults(func=cmd_fill)
 
     take = commands.add_parser("take", help="claim a ready slot for a branch")
-    take.add_argument("branch", help="branch to create or check out in the slot")
+    take.add_argument(
+        "branch", nargs="?", help="branch to create or check out in the slot"
+    )
+    take.add_argument(
+        "--scratch",
+        action="store_true",
+        help="claim a slot on a generated scratch/<id> branch, for throwaway "
+        "work that does not deserve a name",
+    )
     take.add_argument("--from", dest="from_ref", metavar="REF", help="start point")
     take.add_argument(
         "--json",
@@ -136,6 +144,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     adopt.add_argument("path", help="path of the worktree to adopt")
     adopt.set_defaults(func=cmd_adopt)
+
+    exec_cmd = commands.add_parser(
+        "exec", help="run a command inside the slot holding a branch"
+    )
+    exec_cmd.add_argument("branch", help="branch whose slot to run in")
+    exec_cmd.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        help="command to run, after `--`",
+    )
+    exec_cmd.set_defaults(func=cmd_exec)
 
     remove = commands.add_parser("remove", help="delete slots")
     remove.add_argument("names", nargs="*", metavar="SLOT", help="slots to delete")
@@ -266,19 +285,28 @@ def cmd_fill(args: argparse.Namespace) -> int:
 
 
 def cmd_take(args: argparse.Namespace) -> int:
+    if args.scratch and args.branch:
+        fail("--scratch generates the branch name; do not pass one")
+        return 2
+    if not args.scratch and not args.branch:
+        fail("name a branch, or use --scratch for a generated one")
+        return 2
     pool = _pool()
-    slot, cold = pool.take(args.branch, from_ref=args.from_ref)
+    slot, cold = pool.take(args.branch, from_ref=args.from_ref, scratch=args.scratch)
+    branch = slot.branch
     if cold:
-        note(f"no ready slot; created {slot.name} cold for {args.branch}")
+        note(f"no ready slot; created {slot.name} cold for {branch}")
     else:
-        note(f"took {slot.name} for {args.branch}")
+        note(f"took {slot.name} for {branch}")
+    if args.scratch:
+        note(f"scratch branch: {branch}; release it with `warmtree release {branch}`")
     if args.json:
         print(
             json.dumps(
                 {
                     "path": slot.path,
                     "slot": slot.name,
-                    "branch": slot.branch,
+                    "branch": branch,
                     "cold": cold,
                 }
             )
@@ -325,6 +353,37 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     note("editors and shells still open on the old path need repointing")
     print(slot.path)
     return 0
+
+
+def cmd_exec(args: argparse.Namespace) -> int:
+    command = args.command
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        fail("nothing to run; usage: warmtree exec <branch> -- <command...>")
+        return 2
+    slot = _pool().taken(args.branch)
+    if not Path(slot.path).is_dir():
+        fail(f"{slot.name} directory is missing; run `warmtree doctor`")
+        return 1
+    env = dict(os.environ)
+    env["WARMTREE_SLOT"] = str(slot.number)
+    # Streams are inherited on purpose: exec is a passthrough, and the
+    # child's output and exit code are the whole point. Like any process
+    # working inside a slot, the child does not pin it; do not release the
+    # branch while a command is still running in its slot.
+    try:
+        completed = subprocess.run(command, cwd=slot.path, env=env)
+    except FileNotFoundError:
+        fail(f"command not found: {command[0]}")
+        return 127
+    except PermissionError:
+        fail(f"not executable: {command[0]}")
+        return 126
+    except OSError as exc:
+        fail(f"cannot run {command[0]}: {exc}")
+        return 1
+    return completed.returncode
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
