@@ -1,5 +1,6 @@
 """`exec` runs a command inside the slot holding a branch."""
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -53,3 +54,11 @@ def test_exec_for_a_branch_not_in_a_slot_fails(
 
 def test_exec_missing_program_returns_127(taken: Pool):
     assert main(["exec", "feature", "--", "definitely-not-a-real-program"]) == 127
+
+
+def test_exec_with_a_missing_slot_directory_points_at_doctor(
+    taken: Pool, capsys: pytest.CaptureFixture[str]
+):
+    shutil.rmtree(taken.taken("feature").path)
+    assert main(["exec", "feature", "--", "true"]) == 1
+    assert "doctor" in capsys.readouterr().err
