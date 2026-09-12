@@ -130,6 +130,11 @@ class Pool:
         with self.locked():
             return self.load_state()
 
+    def taken(self, branch: str) -> Slot:
+        """The taken slot holding `branch`. Raises PoolError if none does."""
+        with self.locked():
+            return _find_taken(self.load_state(), branch)
+
     def _update_slot(self, name: str, **fields: object) -> Slot:
         """Reload state, change one slot's fields, save. Returns the slot."""
         with self.locked():
