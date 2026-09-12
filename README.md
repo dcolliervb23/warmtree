@@ -42,6 +42,10 @@ uv tool install git+https://github.com/dcolliervb23/warmtree
 Or from PyPI: `uvx warmtree` works on a machine with nothing but Python
 and git.
 
+Updating is your package manager's job, not warmtree's:
+`uv tool upgrade warmtree` for a tool install, and `uvx` resolves new
+releases on its own (`uvx warmtree@latest` forces it).
+
 ## Quick start
 
 Run these from inside the repo you want to pool.
@@ -115,6 +119,7 @@ pool's fresh slots do the work.
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. |
+| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, untracked directories in the pool. `--fix` applies the safe repairs. |
 
 Slot states:
 
