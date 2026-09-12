@@ -69,6 +69,16 @@ class Refreshed:
     rewarmed: bool  # the run commands executed again
 
 
+@dataclass
+class Finding:
+    """One problem `doctor` found, and what it did or suggests."""
+
+    slot: str | None  # None for problems not tied to a state entry
+    problem: str
+    fixed: bool = False
+    hint: str = ""
+
+
 class Pool:
     def __init__(
         self,
@@ -334,6 +344,96 @@ class Pool:
                 git.worktree_remove(self.repo_root, Path(slot.path))
             self.save_state([slot for slot in slots if slot not in targets])
             return targets
+
+    def doctor(self, fix: bool = False) -> list[Finding]:
+        """Compare state.json against git and the filesystem, report drift.
+
+        With fix=True the one safe repair is applied: a state entry whose
+        directory is gone is removed from git's registration and, once git
+        confirms it is unregistered, dropped from state. Everything else is
+        reported with a hint and left alone: a warming slot may belong to a
+        live fill or refresh in another process, so repairing it here could
+        start a second warm in the same directory.
+        """
+        findings: list[Finding] = []
+        with self.locked():
+            slots = self.load_state()
+            registered = set(git.worktree_list(self.repo_root))
+            kept: list[Slot] = []
+            changed = False
+            for slot in slots:
+                path = Path(slot.path)
+                if not path.is_dir():
+                    # A warming slot belongs to a live fill or refresh in
+                    # another process; dropping its entry here would make
+                    # that worker fail when it writes its result.
+                    if slot.state == "warming":
+                        kept.append(slot)
+                        findings.append(
+                            Finding(
+                                slot.name,
+                                "directory is gone while marked warming",
+                                hint="wait for the fill or refresh to fail, "
+                                "then run doctor again",
+                            )
+                        )
+                        continue
+                    fixed = False
+                    if fix:
+                        git.worktree_remove(self.repo_root, path)
+                        fixed = path.resolve() not in git.worktree_list(self.repo_root)
+                    if fixed:
+                        changed = True
+                    else:
+                        kept.append(slot)
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory is gone but the slot is still in state",
+                            fixed=fixed,
+                            hint=""
+                            if fixed
+                            else "--fix removes the registration and drops the slot",
+                        )
+                    )
+                    continue
+                kept.append(slot)
+                if path.resolve() not in registered:
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory exists but git does not list it as a worktree",
+                            hint="`git worktree repair` in the main "
+                            "worktree may recover it",
+                        )
+                    )
+                if slot.state == "warming":
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "marked warming; fine if a fill or refresh is "
+                            "running, stuck if that process died",
+                            hint="wait for it to finish; if it is dead, "
+                            f"`warmtree remove {slot.name} --force` "
+                            "and `warmtree fill`",
+                        )
+                    )
+            known = {Path(slot.path).resolve() for slot in kept}
+            if self.dir.is_dir():
+                for child in sorted(self.dir.iterdir()):
+                    if child.is_dir() and child.resolve() not in known:
+                        findings.append(
+                            Finding(
+                                None,
+                                f"{child.name} is in the pool directory but "
+                                "not in state",
+                                hint="delete it, or adopt it if it is a "
+                                "worktree you want",
+                            )
+                        )
+            if changed:
+                self.save_state(kept)
+        return findings
 
     # --- warming ----------------------------------------------------------
 

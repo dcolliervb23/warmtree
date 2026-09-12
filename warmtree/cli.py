@@ -139,6 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true", help="print JSON for agents")
     status.set_defaults(func=cmd_status)
 
+    doctor = commands.add_parser(
+        "doctor", help="check the pool for drift between state, git, and disk"
+    )
+    doctor.add_argument("--fix", action="store_true", help="apply the safe repairs")
+    doctor.set_defaults(func=cmd_doctor)
+
     return parser
 
 
@@ -305,6 +311,22 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
     print_table(slots)
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    findings = _pool().doctor(fix=args.fix)
+    if not findings:
+        print("pool is healthy")
+        return 0
+    for finding in findings:
+        where = finding.slot or "pool"
+        line = f"{where}: {finding.problem}"
+        if finding.fixed:
+            line += " (fixed)"
+        elif finding.hint:
+            line += f" ({finding.hint})"
+        print(line)
+    return 0 if all(finding.fixed for finding in findings) else 1
 
 
 def print_table(slots: list[Slot]) -> None:
