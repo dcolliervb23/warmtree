@@ -84,6 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
     skill_cmd.add_argument(
         "--force", action="store_true", help="overwrite a copy that was edited"
     )
+    skill_cmd.add_argument(
+        "--user",
+        action="store_true",
+        help="install into the tools' personal skills folders in your home "
+        "directory instead of the repo, so no repo ever contains the file",
+    )
     skill_cmd.set_defaults(func=cmd_skill)
 
     fill = commands.add_parser("fill", help="create any missing slots")
@@ -167,27 +173,38 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_skill(args: argparse.Namespace) -> int:
-    root = git.repo_root(Path.cwd())
+    # A user-level install touches only the home directory, so it works
+    # outside any repo and never risks a skill file being committed.
+    root = Path.home() if args.user else git.repo_root(Path.cwd())
     if args.tool:
         targets = [skill.by_tool(key) for key in args.tool]
+    elif args.user:
+        targets = skill.detect_user(root)
     else:
         targets = skill.detect(root)
     if not targets:
-        fail(
-            "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
-            "copilot-instructions.md); "
-            f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
-        )
+        if args.user:
+            fail(
+                "no agent folder found in your home directory "
+                "(.claude, .copilot, .codex, .cursor); "
+                f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
+            )
+        else:
+            fail(
+                "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
+                "copilot-instructions.md); "
+                f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
+            )
         return 1
-    results = skill.install(root, targets, force=args.force)
-    _report_skill(root, results)
+    results = skill.install(root, targets, force=args.force, user=args.user)
+    _report_skill(root, results, prefix="~/" if args.user else "")
     return 0
 
 
-def _report_skill(root: Path, results: list[skill.Installed]) -> None:
+def _report_skill(root: Path, results: list[skill.Installed], prefix: str = "") -> None:
     for result in results:
         where = result.path.relative_to(root).as_posix()
-        print(f"{result.action}: {result.target.tool} skill at {where}")
+        print(f"{result.action}: {result.target.tool} skill at {prefix}{where}")
     if any(result.action == "kept" for result in results):
         note("a copy you edited was kept; use `warmtree skill --force` to replace it")
 

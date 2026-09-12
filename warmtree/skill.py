@@ -35,19 +35,28 @@ class Target:
     tool: str  # name shown to the user
     markers: tuple[str, ...]  # files or folders that mean the tool is used here
     skills_dir: str  # where that tool reads project skills from
+    user_dir: str  # folder in the home directory the tool keeps its config in
+
+    @property
+    def user_skills_dir(self) -> str:
+        """Where the tool reads personal skills from, relative to home."""
+        return f"{self.user_dir}/skills"
 
 
 # A bare .github folder is not a marker: nearly every repo has one for CI.
 TARGETS = (
-    Target("claude", "Claude Code", ("CLAUDE.md", ".claude"), ".claude/skills"),
+    Target(
+        "claude", "Claude Code", ("CLAUDE.md", ".claude"), ".claude/skills", ".claude"
+    ),
     Target(
         "copilot",
         "GitHub Copilot",
         (".github/copilot-instructions.md",),
         ".github/skills",
+        ".copilot",
     ),
-    Target("codex", "Codex", ("AGENTS.md", ".agents"), ".agents/skills"),
-    Target("cursor", "Cursor", (".cursor",), ".cursor/skills"),
+    Target("codex", "Codex", ("AGENTS.md", ".agents"), ".agents/skills", ".codex"),
+    Target("cursor", "Cursor", (".cursor",), ".cursor/skills", ".cursor"),
 )
 
 TOOL_KEYS = tuple(target.key for target in TARGETS)
@@ -75,6 +84,11 @@ def detect(repo_root: Path) -> list[Target]:
     ]
 
 
+def detect_user(home: Path) -> list[Target]:
+    """Tools installed for this user: their config folder is in home."""
+    return [target for target in TARGETS if (home / target.user_dir).is_dir()]
+
+
 def by_tool(key: str) -> Target:
     for target in TARGETS:
         if target.key == key:
@@ -83,9 +97,13 @@ def by_tool(key: str) -> Target:
 
 
 def install(
-    repo_root: Path, targets: list[Target], force: bool = False
+    root: Path, targets: list[Target], force: bool = False, user: bool = False
 ) -> list[Installed]:
     """Copy the skill into each target's skills folder.
+
+    `root` is the repo root, or the home directory with user=True, which
+    installs into each tool's personal skills folder so nothing is added
+    to any repository.
 
     written: the file did not exist. current: identical copy already there.
     updated: an unedited copy of a past version, or --force, was overwritten.
@@ -94,7 +112,8 @@ def install(
     text = skill_text()
     results = []
     for target in targets:
-        path = repo_root / target.skills_dir / SKILL_NAME / "SKILL.md"
+        skills_dir = target.user_skills_dir if user else target.skills_dir
+        path = root / skills_dir / SKILL_NAME / "SKILL.md"
         if not path.exists():
             action = "written"
         else:
