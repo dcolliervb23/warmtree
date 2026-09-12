@@ -56,7 +56,10 @@ def test_tree_size_counts_directory_symlinks_without_following(tmp_path: Path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (elsewhere / "big").write_bytes(b"x" * 10_000)
-    (tree / "link").symlink_to(elsewhere, target_is_directory=True)
+    try:
+        (tree / "link").symlink_to(elsewhere, target_is_directory=True)
+    except OSError:
+        pytest.skip("creating symlinks needs privileges on this platform")
 
     size = _tree_size(tree)
     assert size >= 100  # the real file
