@@ -113,6 +113,7 @@ pool's fresh slots do the work.
 | `warmtree take ... --no-refill` | Skip the refill. |
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. |
+| `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. |
 | `warmtree adopt <path>` | Move an existing worktree into the pool as a taken slot. Its branch, uncommitted changes, and installed dependencies come with it; a later `release` recycles them. Prints the new path. |
 | `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
