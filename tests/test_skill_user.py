@@ -84,6 +84,27 @@ def test_skill_user_cli_without_agent_folders_says_so(
     assert "no agent folder" in capsys.readouterr().err
 
 
+def test_init_user_skill_keeps_the_repo_clean(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    (repo / "CLAUDE.md").write_text("agent config\n")
+    home = repo.parent / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(repo)
+
+    assert main(["init", "--user-skill"]) == 0
+    assert (home / ".claude" / "skills" / "warmtree" / "SKILL.md").exists()
+    assert not (repo / ".claude").exists()
+    assert "~/.claude/skills/warmtree/SKILL.md" in capsys.readouterr().out
+
+
+def test_init_refuses_no_skill_with_user_skill(repo: Path, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit):
+        main(["init", "--no-skill", "--user-skill"])
+
+
 def test_skill_user_cli_with_explicit_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):

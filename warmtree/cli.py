@@ -67,8 +67,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = commands.add_parser("init", help=f"write a starter {CONFIG_NAME}")
     init.add_argument("--force", action="store_true", help="overwrite an existing file")
-    init.add_argument(
+    init_skill = init.add_mutually_exclusive_group()
+    init_skill.add_argument(
         "--no-skill", action="store_true", help="do not install the agent skill"
+    )
+    init_skill.add_argument(
+        "--user-skill",
+        action="store_true",
+        help="install the agent skill into your home directory instead of "
+        "the repo, so the repo never contains it",
     )
     init.set_defaults(func=cmd_init)
 
@@ -160,7 +167,17 @@ def cmd_init(args: argparse.Namespace) -> int:
     if lockfiles:
         print(f"lockfiles: {', '.join(lockfiles)}")
     print("edit [warm] run to add your install command; warmtree never guesses it")
-    if not args.no_skill:
+    if args.user_skill:
+        home = Path.home()
+        targets = skill.detect_user(home)
+        if targets:
+            _report_skill(home, skill.install(home, targets, user=True), user=True)
+        else:
+            print(
+                "no agent folder found in your home directory; install later "
+                f"with `warmtree skill --user --tool {'|'.join(skill.TOOL_KEYS)}`"
+            )
+    elif not args.no_skill:
         targets = skill.detect(root)
         if targets:
             _report_skill(root, skill.install(root, targets))
