@@ -12,6 +12,7 @@ again. Never call one locked method from inside another.
 
 import json
 import os
+import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -164,14 +165,25 @@ class Pool:
             # status() keep working while it runs.
             created.append(self._warm(slot, run=True))
 
-    def take(self, branch: str, from_ref: str | None = None) -> tuple[Slot, bool]:
+    def take(
+        self,
+        branch: str | None,
+        from_ref: str | None = None,
+        scratch: bool = False,
+    ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
         The oldest ready slot gets `branch` checked out (created from
         `from_ref` or base if it does not exist). With no ready slot, a new
         worktree is created the slow way and joins the pool as a taken slot.
+        With scratch=True the branch name is generated under the claim lock,
+        so two concurrent scratch takes can never pick the same name.
         """
         with self.locked():
+            if scratch:
+                branch = _scratch_name(self.repo_root)
+            if branch is None:
+                raise PoolError("take needs a branch name")
             slots = self.load_state()
             start = from_ref or self.base()
             ready = sorted(
@@ -500,6 +512,19 @@ def _next_name(slots: list[Slot]) -> str:
     while f"slot-{number}" in used:
         number += 1
     return f"slot-{number}"
+
+
+def _scratch_name(repo_root: Path) -> str:
+    """A scratch/<id> branch name no existing ref uses.
+
+    Called under the pool lock, so concurrent takes cannot both pick the
+    same free name.
+    """
+    for _ in range(32):
+        candidate = f"scratch/{secrets.token_hex(4)}"
+        if not git.branch_exists(repo_root, candidate):
+            return candidate
+    raise PoolError("could not find a free scratch branch name")
 
 
 def _now() -> str:

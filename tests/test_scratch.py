@@ -43,7 +43,7 @@ def test_scratch_skips_a_name_that_already_exists(
 ):
     run_git("branch", "scratch/deadbeef", cwd=filled.repo_root)
     tokens = iter(["deadbeef", "0badf00d"])
-    monkeypatch.setattr("warmtree.cli.secrets.token_hex", lambda n: next(tokens))
+    monkeypatch.setattr("warmtree.pool.secrets.token_hex", lambda n: next(tokens))
 
     assert main(["take", "--scratch", "--no-refill"]) == 0
     branches = {slot.branch for slot in filled.status() if slot.state == "taken"}
