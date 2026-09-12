@@ -271,8 +271,19 @@ def cmd_take(args: argparse.Namespace) -> int:
     if not args.scratch and not args.branch:
         fail("name a branch, or use --scratch for a generated one")
         return 2
-    branch = args.branch or f"scratch/{secrets.token_hex(4)}"
     pool = _pool()
+    branch = args.branch
+    if branch is None:
+        # An existing branch would be checked out rather than created, so a
+        # colliding name could attach the slot to someone's old scratch work.
+        for _ in range(32):
+            candidate = f"scratch/{secrets.token_hex(4)}"
+            if not git.branch_exists(pool.repo_root, candidate):
+                branch = candidate
+                break
+        else:
+            fail("could not find a free scratch branch name")
+            return 1
     slot, cold = pool.take(branch, from_ref=args.from_ref)
     if cold:
         note(f"no ready slot; created {slot.name} cold for {branch}")
