@@ -197,16 +197,20 @@ def cmd_skill(args: argparse.Namespace) -> int:
             )
         return 1
     results = skill.install(root, targets, force=args.force, user=args.user)
-    _report_skill(root, results, prefix="~/" if args.user else "")
+    _report_skill(root, results, user=args.user)
     return 0
 
 
-def _report_skill(root: Path, results: list[skill.Installed], prefix: str = "") -> None:
+def _report_skill(
+    root: Path, results: list[skill.Installed], user: bool = False
+) -> None:
+    prefix = "~/" if user else ""
     for result in results:
         where = result.path.relative_to(root).as_posix()
         print(f"{result.action}: {result.target.tool} skill at {prefix}{where}")
     if any(result.action == "kept" for result in results):
-        note("a copy you edited was kept; use `warmtree skill --force` to replace it")
+        flags = "--user --force" if user else "--force"
+        note(f"a copy you edited was kept; use `warmtree skill {flags}` to replace it")
 
 
 def cmd_fill(args: argparse.Namespace) -> int:

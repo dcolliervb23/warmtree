@@ -55,6 +55,23 @@ def test_skill_user_cli_works_outside_a_repo(
     assert (home / ".claude" / "skills" / "warmtree" / "SKILL.md").exists()
 
 
+def test_skill_user_kept_note_names_the_user_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+
+    main(["skill", "--user"])
+    copy = home / ".claude" / "skills" / "warmtree" / "SKILL.md"
+    copy.write_text("my own version\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert main(["skill", "--user"]) == 0
+    assert "warmtree skill --user --force" in capsys.readouterr().err
+
+
 def test_skill_user_cli_without_agent_folders_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
