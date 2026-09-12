@@ -106,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     take = commands.add_parser("take", help="claim a ready slot for a branch")
     take.add_argument("branch", help="branch to create or check out in the slot")
     take.add_argument("--from", dest="from_ref", metavar="REF", help="start point")
+    take.add_argument(
+        "--json",
+        action="store_true",
+        help="print a JSON object (path, slot, branch, cold) instead of the path",
+    )
     refill = take.add_mutually_exclusive_group()
     refill.add_argument("--no-refill", action="store_true", help="do not refill")
     refill.add_argument(
@@ -119,6 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("branch", help="branch currently checked out in the slot")
     release.add_argument("--keep-branch", action="store_true", help="keep the ref")
     release.add_argument("--force", action="store_true", help="discard changes")
+    release.add_argument(
+        "--json",
+        action="store_true",
+        help="print a JSON object (slot, branch, branch_deleted)",
+    )
     release.set_defaults(func=cmd_release)
 
     adopt = commands.add_parser(
@@ -262,7 +272,19 @@ def cmd_take(args: argparse.Namespace) -> int:
         note(f"no ready slot; created {slot.name} cold for {args.branch}")
     else:
         note(f"took {slot.name} for {args.branch}")
-    print(slot.path)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "path": slot.path,
+                    "slot": slot.name,
+                    "branch": slot.branch,
+                    "cold": cold,
+                }
+            )
+        )
+    else:
+        print(slot.path)
 
     if args.refill_background:
         _spawn_background_fill(pool.repo_root)
@@ -277,6 +299,17 @@ def cmd_release(args: argparse.Namespace) -> int:
     slot, branch_deleted = _pool().release(
         args.branch, keep_branch=args.keep_branch, force=args.force
     )
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "slot": slot.name,
+                    "branch": args.branch,
+                    "branch_deleted": branch_deleted,
+                }
+            )
+        )
+        return 0
     print(f"released {slot.name}")
     if branch_deleted:
         print(f"deleted branch {args.branch}")
