@@ -1,6 +1,6 @@
 [project]
 name = "warmtree"
-version = "0.2.0"
+version = "0.3.0"
 description = "A pool of pre-warmed git worktrees for parallel AI coding agents."
 readme = "README.md"
 requires-python = ">=3.12"
