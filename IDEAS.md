@@ -56,3 +56,9 @@ Append here instead of expanding DESIGN.md.
   (config key vs `git clean -ndX`), Windows story (ReFS block cloning is
   rare on dev machines), and whether release-deletes-clone should retire
   reset-on-release entirely once the template path exists.
+- **Slot leases.** Nothing stops `release` while a process is working
+  inside a slot: a shell after `cd $(warmtree take x)`, an editor, or
+  `warmtree exec`. The dirty-tree refusal is the only guard. A lease field
+  in state (holder pid + expiry, set by take/exec, checked by release)
+  would close it for every entry point at once; per-command fixes would
+  not. From the exec review, 2026-09-12.
