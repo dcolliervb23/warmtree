@@ -103,7 +103,7 @@ pool's fresh slots do the work.
 | Command | What it does |
 |---|---|
 | `warmtree init [--force] [--no-skill]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. Installs the agent skill for any coding agent it detects. |
-| `warmtree skill [--tool T] [--force]` | Install or refresh the agent skill in the tool folders this repo uses, or in the ones named with `--tool`. Never overwrites an edited copy without `--force`. |
+| `warmtree skill [--tool T] [--user] [--force]` | Install or refresh the agent skill in the tool folders this repo uses, or in the ones named with `--tool`. `--user` installs into the tools' personal skills folders in your home directory (`~/.claude/skills`, `~/.copilot/skills`, `~/.codex/skills`, `~/.cursor/skills`) so no repo ever contains the file; it works outside a repo and covers every repo at once. Never overwrites an edited copy without `--force`. |
 | `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch, with `copy` files copied in and `run` commands executed. |
 | `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Creates `<branch>` there (from `REF` or the base branch) or checks it out if it already exists. Prints the path, then refills the pool. |
 | `warmtree take ... --no-refill` | Skip the refill. |
