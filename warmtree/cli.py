@@ -104,7 +104,15 @@ def build_parser() -> argparse.ArgumentParser:
     fill.set_defaults(func=cmd_fill)
 
     take = commands.add_parser("take", help="claim a ready slot for a branch")
-    take.add_argument("branch", help="branch to create or check out in the slot")
+    take.add_argument(
+        "branch", nargs="?", help="branch to create or check out in the slot"
+    )
+    take.add_argument(
+        "--scratch",
+        action="store_true",
+        help="claim a slot on a generated scratch/<id> branch, for throwaway "
+        "work that does not deserve a name",
+    )
     take.add_argument("--from", dest="from_ref", metavar="REF", help="start point")
     refill = take.add_mutually_exclusive_group()
     refill.add_argument("--no-refill", action="store_true", help="do not refill")
@@ -267,12 +275,21 @@ def cmd_fill(args: argparse.Namespace) -> int:
 
 
 def cmd_take(args: argparse.Namespace) -> int:
+    if args.scratch and args.branch:
+        fail("--scratch generates the branch name; do not pass one")
+        return 2
+    if not args.scratch and not args.branch:
+        fail("name a branch, or use --scratch for a generated one")
+        return 2
     pool = _pool()
-    slot, cold = pool.take(args.branch, from_ref=args.from_ref)
+    slot, cold = pool.take(args.branch, from_ref=args.from_ref, scratch=args.scratch)
+    branch = slot.branch
     if cold:
-        note(f"no ready slot; created {slot.name} cold for {args.branch}")
+        note(f"no ready slot; created {slot.name} cold for {branch}")
     else:
-        note(f"took {slot.name} for {args.branch}")
+        note(f"took {slot.name} for {branch}")
+    if args.scratch:
+        note(f"scratch branch: {branch}; release it with `warmtree release {branch}`")
     print(slot.path)
 
     if args.refill_background:
