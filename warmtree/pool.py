@@ -364,6 +364,20 @@ class Pool:
             for slot in slots:
                 path = Path(slot.path)
                 if not path.is_dir():
+                    # A warming slot belongs to a live fill or refresh in
+                    # another process; dropping its entry here would make
+                    # that worker fail when it writes its result.
+                    if slot.state == "warming":
+                        kept.append(slot)
+                        findings.append(
+                            Finding(
+                                slot.name,
+                                "directory is gone while marked warming",
+                                hint="wait for the fill or refresh to fail, "
+                                "then run doctor again",
+                            )
+                        )
+                        continue
                     fixed = False
                     if fix:
                         git.worktree_remove(self.repo_root, path)

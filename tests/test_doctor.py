@@ -63,6 +63,20 @@ def test_fixing_a_missing_slot_leaves_other_registrations_alone(repo: Path):
     assert other.resolve() in git.worktree_list(repo)
 
 
+def test_missing_directory_of_a_warming_slot_is_never_dropped(repo: Path):
+    # The warming worker still holds this entry; dropping it would make
+    # the worker's finishing write fail.
+    pool = Pool(repo, Config(size=1))
+    [slot] = pool.fill()
+    pool._update_slot(slot.name, state="warming")
+    shutil.rmtree(slot.path)
+
+    [finding] = pool.doctor(fix=True)
+    assert not finding.fixed
+    assert "warming" in finding.problem
+    assert pool.status()[0].name == slot.name
+
+
 def test_stranger_directory_in_pool_dir_is_reported(repo: Path):
     pool = Pool(repo, Config(size=1))
     pool.fill()
