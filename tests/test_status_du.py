@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from warmtree.cli import _human, main
+from warmtree.cli import _human, _tree_size, main
 
 
 def test_status_du_adds_size_column_and_total(
@@ -47,6 +47,20 @@ def test_status_json_du_includes_bytes(
     main(["status", "--json"])
     slots = json.loads(capsys.readouterr().out)
     assert all("du_bytes" not in slot for slot in slots)
+
+
+def test_tree_size_counts_directory_symlinks_without_following(tmp_path: Path):
+    tree = tmp_path / "tree"
+    (tree / "real").mkdir(parents=True)
+    (tree / "real" / "file").write_bytes(b"x" * 100)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "big").write_bytes(b"x" * 10_000)
+    (tree / "link").symlink_to(elsewhere, target_is_directory=True)
+
+    size = _tree_size(tree)
+    assert size >= 100  # the real file
+    assert size < 10_000  # the link itself, never what it points at
 
 
 def test_human_sizes_read_like_du():

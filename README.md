@@ -114,7 +114,7 @@ pool's fresh slots do the work.
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
-| `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk. |
+| `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk; with `--json` it adds a `du_bytes` field per slot. |
 
 Slot states:
 

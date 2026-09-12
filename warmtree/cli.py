@@ -345,10 +345,15 @@ def print_table(slots: list[Slot], sizes: dict[str, int] | None = None) -> None:
 
 
 def _tree_size(path: Path) -> int:
-    """Total bytes under `path`. Symlinks are counted, not followed."""
+    """Total bytes under `path`. Symlinks are counted, not followed.
+
+    os.walk puts a symlink to a directory in dirnames and does not recurse
+    into it, so those links are sized explicitly or they would be missed.
+    """
     total = 0
-    for dirpath, _dirnames, filenames in os.walk(path):
-        for name in filenames:
+    for dirpath, dirnames, filenames in os.walk(path):
+        links = [n for n in dirnames if os.path.islink(os.path.join(dirpath, n))]
+        for name in filenames + links:
             try:
                 total += os.lstat(os.path.join(dirpath, name)).st_size
             except OSError:
