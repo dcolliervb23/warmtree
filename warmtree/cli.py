@@ -299,6 +299,8 @@ def cmd_release(args: argparse.Namespace) -> int:
     slot, branch_deleted = _pool().release(
         args.branch, keep_branch=args.keep_branch, force=args.force
     )
+    if not branch_deleted and not args.keep_branch:
+        note(f"kept branch {args.branch}: it has commits that are not merged")
     if args.json:
         print(
             json.dumps(
@@ -313,8 +315,6 @@ def cmd_release(args: argparse.Namespace) -> int:
     print(f"released {slot.name}")
     if branch_deleted:
         print(f"deleted branch {args.branch}")
-    elif not args.keep_branch:
-        note(f"kept branch {args.branch}: it has commits that are not merged")
     return 0
 
 

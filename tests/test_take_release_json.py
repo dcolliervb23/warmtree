@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import git as run_git
 from warmtree.cli import main
 from warmtree.config import Config
 from warmtree.pool import Pool
@@ -52,6 +53,23 @@ def test_release_json_reports_the_branch_fate(
     out = capsys.readouterr().out
     data = json.loads(out)
     assert data == {"slot": "slot-1", "branch": "feature", "branch_deleted": True}
+
+
+def test_release_json_keeps_the_unmerged_warning_on_stderr(
+    filled: Pool, capsys: pytest.CaptureFixture[str]
+):
+    main(["take", "feature", "--no-refill"])
+    path = Path(filled.status()[0].path)
+    (path / "extra.txt").write_text("unmerged work\n")
+    run_git("add", "extra.txt", cwd=path)
+    run_git("commit", "-q", "-m", "unmerged", cwd=path)
+    capsys.readouterr()
+
+    assert main(["release", "feature", "--json"]) == 0
+    out, err = capsys.readouterr()
+    data = json.loads(out)
+    assert data["branch_deleted"] is False
+    assert "kept branch feature" in err
 
 
 def test_without_json_the_old_contracts_hold(
