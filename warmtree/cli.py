@@ -175,7 +175,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         else:
             print(
                 "no agent folder found in your home directory; install later "
-                f"with `warmtree skill --user --tool {'|'.join(skill.TOOL_KEYS)}`"
+                "with e.g. `warmtree skill --user --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
     elif not args.no_skill:
         targets = skill.detect(root)
@@ -184,7 +185,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         else:
             print(
                 "no agent config detected; install the skill later with "
-                f"`warmtree skill --tool {'|'.join(skill.TOOL_KEYS)}`"
+                "e.g. `warmtree skill --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
     return 0
 
@@ -203,14 +205,16 @@ def cmd_skill(args: argparse.Namespace) -> int:
         if args.user:
             fail(
                 "no agent folder found in your home directory "
-                "(.claude, .copilot, .codex, .cursor); "
-                f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
+                "(.claude, .copilot, .codex, .cursor); pick one with e.g. "
+                "`warmtree skill --user --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
         else:
             fail(
                 "no agent config detected (CLAUDE.md, AGENTS.md, .cursor, "
-                "copilot-instructions.md); "
-                f"pick one with --tool {'|'.join(skill.TOOL_KEYS)}"
+                "copilot-instructions.md); pick one with e.g. "
+                "`warmtree skill --tool claude` "
+                f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
         return 1
     results = skill.install(root, targets, force=args.force, user=args.user)
