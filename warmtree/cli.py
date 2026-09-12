@@ -6,6 +6,7 @@ Everything a human reads goes to stderr.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections import Counter
@@ -137,6 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = commands.add_parser("status", help="show every slot")
     status.add_argument("--json", action="store_true", help="print JSON for agents")
+    status.add_argument(
+        "--du", action="store_true", help="measure and show disk usage per slot"
+    )
     status.set_defaults(func=cmd_status)
 
     return parser
@@ -297,33 +301,72 @@ def cmd_which(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     slots = _pool().status()
+    sizes = None
+    if args.du:
+        sizes = {slot.name: _tree_size(Path(slot.path)) for slot in slots}
     if args.json:
-        print(json.dumps([slot.to_dict() for slot in slots], indent=2))
+        items = []
+        for slot in slots:
+            item = slot.to_dict()
+            if sizes is not None:
+                item["du_bytes"] = sizes[slot.name]
+            items.append(item)
+        print(json.dumps(items, indent=2))
         return 0
     if not slots:
         print("no slots yet; run `warmtree fill`")
         return 0
-    print_table(slots)
+    print_table(slots, sizes)
+    if sizes is not None:
+        print(f"total {_human(sum(sizes.values()))}")
     return 0
 
 
-def print_table(slots: list[Slot]) -> None:
+def print_table(slots: list[Slot], sizes: dict[str, int] | None = None) -> None:
     rows = [("SLOT", "STATE", "BRANCH", "AGE", "WARMED", "PATH")]
+    if sizes is not None:
+        rows = [("SLOT", "STATE", "BRANCH", "AGE", "WARMED", "SIZE", "PATH")]
     for slot in slots:
-        rows.append(
-            (
-                slot.name,
-                slot.state,
-                slot.branch or "-",
-                _age(slot.created),
-                _age(slot.warmed) + " ago" if slot.warmed else "-",
-                slot.path,
-            )
-        )
+        row = [
+            slot.name,
+            slot.state,
+            slot.branch or "-",
+            _age(slot.created),
+            _age(slot.warmed) + " ago" if slot.warmed else "-",
+            slot.path,
+        ]
+        if sizes is not None:
+            row.insert(5, _human(sizes[slot.name]))
+        rows.append(tuple(row))
     widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)]
     for row in rows:
         cells = [cell.ljust(widths[i]) for i, cell in enumerate(row[:-1])]
         print("  ".join([*cells, row[-1]]))
+
+
+def _tree_size(path: Path) -> int:
+    """Total bytes under `path`. Symlinks are counted, not followed."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except OSError:
+                pass  # deleted or unreadable mid-walk; skip it
+    return total
+
+
+def _human(size: int) -> str:
+    value = float(size)
+    unit = "B"
+    for bigger in ("KB", "MB", "GB", "TB"):
+        if value < 1024:
+            break
+        value /= 1024
+        unit = bigger
+    if unit == "B":
+        return f"{int(value)} B"
+    return f"{value:.1f} {unit}"
 
 
 def _pool() -> Pool:
