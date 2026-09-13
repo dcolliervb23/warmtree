@@ -559,12 +559,12 @@ def _pid_alive(pid: int) -> bool:
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         ERROR_ACCESS_DENIED = 5
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if handle:
             kernel32.CloseHandle(handle)
             return True
-        return kernel32.GetLastError() == ERROR_ACCESS_DENIED
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

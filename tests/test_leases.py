@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -97,3 +98,18 @@ def test_old_state_without_lease_fields_still_loads(pool: Pool):
 def test_pid_alive_tells_live_from_dead():
     assert _pid_alive(os.getpid()) is True
     assert _pid_alive(dead_pid()) is False
+
+
+def test_command_substitution_leases_to_the_surviving_shell(pool: Pool, repo: Path):
+    # The documented workflow is `cd "$(warmtree take x)"`. POSIX shells
+    # exec the command inside $() directly under the original shell, so the
+    # lease must land on the shell that keeps living, not an intermediary.
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("needs a POSIX shell")
+    script = f'echo $$; p=$("{sys.executable}" -m warmtree take feature --no-refill)'
+    result = subprocess.run(
+        [bash, "-c", script], cwd=repo, capture_output=True, text=True, check=True
+    )
+    shell_pid = int(result.stdout.strip().splitlines()[0])
+    assert pool.taken("feature").lease_pid == shell_pid
