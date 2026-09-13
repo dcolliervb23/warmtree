@@ -41,6 +41,17 @@ Append here instead of expanding DESIGN.md.
   Cleanup confined to worktrees warmtree owns, no forge APIs.
 - **README FAQ: onboarding an existing repo.** The pool is additive; old
   worktrees age out naturally. Say so explicitly for mid-development users.
+- **Reflink spike results (2026-09-13, spike/reflink branch).** Measured on
+  real btrfs, xfs, and apfs via CI loop mounts: cloning a 529 MB, 45,000-file
+  synthetic node_modules took 2.4s / 4.0s / 10.6s — only 1-3x faster than a
+  plain copy, because many-small-files trees are metadata-bound and reflink
+  only skips data blocks. Never milliseconds. Disk sharing and independence
+  both held (clones cost 12-48 MB). Conclusion: cloning cannot replace the
+  pool (a pool take is 0.15s because nothing is copied), but it is a strong
+  COLD-PATH fallback: a drained pool could clone from a warm template in
+  seconds instead of reinstalling for minutes. Revised shape: pool first,
+  template clone second, full install last; probe support per pool dir and
+  skip silently where unsupported (ecryptfs/ext4, i.e. most defaults).
 - **Reflink template slots (v0.4+ direction).** One warm template worktree
   instead of N pre-made slots: `take` registers a fresh worktree the normal
   cheap way, then clones the template's warm payload (node_modules, .venv,
