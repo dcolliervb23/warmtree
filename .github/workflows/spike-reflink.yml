@@ -1,0 +1,36 @@
+name: Spike reflink
+
+# Temporary measurement rig for the reflink-template-slots idea in IDEAS.md.
+# Lives only on the spike/reflink branch; never merge it.
+
+on:
+  push:
+    branches: ["spike/reflink"]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make loopback btrfs and xfs filesystems
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q btrfs-progs xfsprogs
+          for fs in btrfs xfs; do
+            truncate -s 4G "/tmp/$fs.img"
+            sudo "mkfs.$fs" -q "/tmp/$fs.img"
+            sudo mkdir -p "/mnt/$fs"
+            sudo mount -o loop "/tmp/$fs.img" "/mnt/$fs"
+            sudo chown "$USER" "/mnt/$fs"
+          done
+      - run: python3 spike/reflink_timing.py /mnt/btrfs btrfs
+      - run: python3 spike/reflink_timing.py /mnt/xfs xfs
+      - name: Control on ext4 (expected to fail the reflink step)
+        run: python3 spike/reflink_timing.py "$RUNNER_TEMP/ext4" ext4
+        continue-on-error: true
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 spike/reflink_timing.py "$RUNNER_TEMP/apfs" apfs
