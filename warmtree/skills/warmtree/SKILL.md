@@ -122,6 +122,7 @@ abandoned.
 | `warmtree: fatal: not a git repository` | You are outside the repo. | `cd` into the repo or any of its worktrees. |
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
+| `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 
 ## Quick reference
 

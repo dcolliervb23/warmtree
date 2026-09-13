@@ -13,6 +13,7 @@ again. Never call one locked method from inside another.
 import json
 import os
 import secrets
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -50,6 +51,11 @@ class Slot:
     created: str = ""
     warmed: str | None = None
     lockfiles: dict[str, str] = field(default_factory=dict)
+    # Lease: the session (shell or agent) that took the slot. Set by take
+    # and adopt to their parent process, cleared by release. Optional with
+    # defaults so state files from older versions load unchanged.
+    lease_pid: int | None = None
+    lease_since: str | None = None
 
     @property
     def number(self) -> int:
@@ -210,6 +216,8 @@ class Pool:
             # leaves the slot ready for the next caller.
             slot.state = "taken"
             slot.branch = branch
+            slot.lease_pid = os.getppid()
+            slot.lease_since = _now()
             self.save_state(slots)
             return slot, cold
 
@@ -221,11 +229,28 @@ class Pool:
         The tree is parked back on base with a detached HEAD. Ignored files
         stay, so the slot is still warm. Returns the slot and whether the
         branch was deleted; a branch with unmerged commits is always kept.
+
+        A slot leased to another session that is still running is refused
+        without force: releasing under a live occupant would reset the tree
+        out from under it. The lease is the session that took the slot, so
+        releasing from that same session always passes, and a lease whose
+        process is gone is stale and ignored.
         """
         with self.locked():
             slots = self.load_state()
             slot = _find_taken(slots, branch)
             path = Path(slot.path)
+            if (
+                not force
+                and slot.lease_pid is not None
+                and slot.lease_pid != os.getppid()
+                and _pid_alive(slot.lease_pid)
+            ):
+                raise PoolError(
+                    f"{slot.name} is held by process {slot.lease_pid} "
+                    f"(since {slot.lease_since}); release from that session, "
+                    "wait for it to exit, or use --force"
+                )
             if not force and git.is_dirty(path):
                 raise PoolError(
                     f"{slot.name} has uncommitted changes; commit or stash them, "
@@ -237,6 +262,8 @@ class Pool:
                 branch_deleted = git.branch_delete(self.repo_root, branch)
             slot.state = "ready"
             slot.branch = None
+            slot.lease_pid = None
+            slot.lease_since = None
             self.save_state(slots)
             return slot, branch_deleted
 
@@ -276,6 +303,8 @@ class Pool:
                 created=_now(),
                 warmed=_now(),
                 lockfiles=warm.hash_lockfiles(dest, self.config.lockfiles),
+                lease_pid=os.getppid(),
+                lease_since=_now(),
             )
             slots.append(slot)
             self.save_state(slots)
@@ -517,6 +546,32 @@ def _next_name(slots: list[Slot]) -> str:
     while f"slot-{number}" in used:
         number += 1
     return f"slot-{number}"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether a process with this id is running. Says alive when unsure.
+
+    Windows has no signal 0 (os.kill there terminates), so it asks the
+    kernel for a query-only process handle instead.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    return True
 
 
 def _scratch_name(repo_root: Path) -> str:
