@@ -105,8 +105,10 @@ def test_command_substitution_leases_to_the_surviving_shell(pool: Pool, repo: Pa
     # exec the command inside $() directly under the original shell, so the
     # lease must land on the shell that keeps living, not an intermediary.
     bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("needs a POSIX shell")
+    if bash is None or sys.platform == "win32":
+        # Git Bash on Windows reports MSYS pids, which do not match the
+        # Windows pids Python sees, so the comparison is meaningless there.
+        pytest.skip("needs a POSIX shell with real pids")
     script = f'echo $$; p=$("{sys.executable}" -m warmtree take feature --no-refill)'
     result = subprocess.run(
         [bash, "-c", script], cwd=repo, capture_output=True, text=True, check=True
