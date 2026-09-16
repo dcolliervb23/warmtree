@@ -195,8 +195,24 @@ class Pool:
                 (slot for slot in slots if slot.state == "ready"),
                 key=lambda slot: (slot.warmed or slot.created, slot.name),
             )
-            if ready:
-                slot = ready[0]
+            # A ready slot must be parked detached. One with a branch checked
+            # out was hijacked behind warmtree's back (a manual checkout in
+            # the slot); claiming it would switch branches under whoever did
+            # that. Record what git says and leave it for release to sort out.
+            claimed = None
+            for candidate in ready:
+                head = git.head_branch(Path(candidate.path))
+                if head is None:
+                    claimed = candidate
+                    break
+                candidate.state = "taken"
+                candidate.branch = head
+                self.log(
+                    f"{candidate.name} was marked ready but has {head} "
+                    "checked out; marked taken instead"
+                )
+            if claimed:
+                slot = claimed
                 _checkout(self.repo_root, Path(slot.path), branch, start)
                 cold = False
             else:
@@ -435,6 +451,26 @@ class Pool:
                             "and `warmtree fill`",
                         )
                     )
+                if slot.state == "ready":
+                    head = git.head_branch(path)
+                    if head is not None:
+                        # Someone checked a branch out in a parked slot
+                        # behind warmtree's back. Marking it taken keeps
+                        # their work; re-detaching would destroy it.
+                        if fix:
+                            slot.state = "taken"
+                            slot.branch = head
+                            changed = True
+                        findings.append(
+                            Finding(
+                                slot.name,
+                                f"marked ready but has {head} checked out",
+                                fixed=fix,
+                                hint=""
+                                if fix
+                                else "--fix marks it taken so release can recycle it",
+                            )
+                        )
             known = {Path(slot.path).resolve() for slot in kept}
             if self.dir.is_dir():
                 for child in sorted(self.dir.iterdir()):
