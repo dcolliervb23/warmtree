@@ -165,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     refresh = commands.add_parser(
         "refresh", help="move waiting slots to base and re-warm if lockfiles changed"
     )
+    refresh.add_argument(
+        "--fetch",
+        action="store_true",
+        help="fetch first and park slots on origin/<base>, so they track "
+        "the remote even when the local base branch is behind",
+    )
     refresh.set_defaults(func=cmd_refresh)
 
     size = commands.add_parser("size", help="show or change how many slots to keep")
@@ -397,7 +403,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
-    results = _pool().refresh()
+    results = _pool().refresh(fetch=args.fetch)
     if not results:
         print("nothing to refresh")
         return 0

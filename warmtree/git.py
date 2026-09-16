@@ -107,6 +107,20 @@ def branch_exists(repo: Path, name: str) -> bool:
     return True
 
 
+def ref_exists(repo: Path, ref: str) -> bool:
+    """Whether `ref` resolves to a commit; remote refs included."""
+    try:
+        run(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], cwd=repo)
+    except GitError:
+        return False
+    return True
+
+
+def fetch(repo: Path) -> None:
+    """Fetch the default remote. A repo with no remote is a quiet no-op."""
+    run(["fetch", "--quiet"], cwd=repo)
+
+
 def checkout_branch(path: Path, branch: str) -> None:
     run(["checkout", "--quiet", branch], cwd=path)
 

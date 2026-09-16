@@ -281,13 +281,25 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def refresh(self) -> list[Refreshed]:
+    def refresh(self, fetch: bool = False) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.
 
         Each slot is moved to the current base commit and its copied files
         are refreshed. The run commands only execute again when a lockfile
         hash changed or the slot's last warm failed.
+
+        With fetch=True the remote is fetched first and slots park on
+        `origin/<base>` where it exists, so they track the remote even when
+        the local base branch is behind. The local branch itself is never
+        moved; the main worktree stays exactly as the user left it.
         """
+        base_ref = self.base()
+        if fetch:
+            git.fetch(self.repo_root)
+            remote_ref = f"origin/{base_ref}"
+            if git.ref_exists(self.repo_root, remote_ref):
+                base_ref = remote_ref
+
         with self.locked():
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
@@ -301,7 +313,7 @@ class Pool:
                 was_stale = slot.state == "stale"
                 slot.state = "warming"
                 self.save_state(slots)
-                base_commit = git.rev_parse(self.repo_root, self.base())
+                base_commit = git.rev_parse(self.repo_root, base_ref)
 
             path = Path(slot.path)
             moved = git.rev_parse(path, "HEAD") != base_commit
