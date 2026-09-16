@@ -200,17 +200,32 @@ class Pool:
             # the slot); claiming it would switch branches under whoever did
             # that. Record what git says and leave it for release to sort out.
             claimed = None
+            saw_hijack = False
             for candidate in ready:
-                head = git.head_branch(Path(candidate.path))
+                cpath = Path(candidate.path)
+                if not git.owns_worktree(self.repo_root, cpath):
+                    # Not our worktree any more; never claim it, never
+                    # record its branch. Doctor reports it.
+                    self.log(
+                        f"{candidate.name} is not a working tree of this "
+                        "repository; skipping it"
+                    )
+                    continue
+                head = git.head_branch(cpath)
                 if head is None:
                     claimed = candidate
                     break
                 candidate.state = "taken"
                 candidate.branch = head
+                saw_hijack = True
                 self.log(
                     f"{candidate.name} was marked ready but has {head} "
                     "checked out; marked taken instead"
                 )
+            if saw_hijack:
+                # Persist the observation now: a failure in the checkout
+                # below must not lose what git told us about these slots.
+                self.save_state(slots)
             if claimed:
                 slot = claimed
                 _checkout(self.repo_root, Path(slot.path), branch, start)
@@ -381,9 +396,11 @@ class Pool:
     def doctor(self, fix: bool = False) -> list[Finding]:
         """Compare state.json against git and the filesystem, report drift.
 
-        With fix=True the one safe repair is applied: a state entry whose
+        With fix=True the two safe repairs are applied: a state entry whose
         directory is gone is removed from git's registration and, once git
-        confirms it is unregistered, dropped from state. Everything else is
+        confirms it is unregistered, dropped from state; and a registered
+        ready slot with a branch checked out is marked taken on that branch,
+        which preserves whatever work is sitting there. Everything else is
         reported with a hint and left alone: a warming slot may belong to a
         live fill or refresh in another process, so repairing it here could
         start a second warm in the same directory.
@@ -431,7 +448,8 @@ class Pool:
                     )
                     continue
                 kept.append(slot)
-                if path.resolve() not in registered:
+                is_registered = path.resolve() in registered
+                if not is_registered:
                     findings.append(
                         Finding(
                             slot.name,
@@ -451,7 +469,24 @@ class Pool:
                             "and `warmtree fill`",
                         )
                     )
-                if slot.state == "ready":
+                # Only for directories that really are our worktrees: a
+                # replaced directory might be an unrelated repository, and
+                # recording its branch would let release reset it later.
+                # Registration is not enough — git keeps listing a replaced
+                # path — so ownership is checked through the shared git dir.
+                if slot.state == "ready" and not git.owns_worktree(
+                    self.repo_root, path
+                ):
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory is no longer a working tree of this repository",
+                            hint="something replaced it; "
+                            f"`warmtree remove {slot.name} --force` "
+                            "and `warmtree fill`",
+                        )
+                    )
+                elif slot.state == "ready":
                     head = git.head_branch(path)
                     if head is not None:
                         # Someone checked a branch out in a parked slot

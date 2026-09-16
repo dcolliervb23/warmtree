@@ -94,6 +94,25 @@ def head_branch(path: Path) -> str | None:
         return None
 
 
+def owns_worktree(repo: Path, path: Path) -> bool:
+    """Whether `path` is a working tree of this repository.
+
+    `git worktree list` keeps listing a path whose directory was replaced
+    by something else, so registration alone proves nothing. The shared
+    git dir is the truth: ours and theirs must be the same directory.
+    """
+    try:
+        theirs = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=path
+        )
+        ours = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=repo
+        )
+    except GitError:
+        return False
+    return Path(theirs).resolve() == Path(ours).resolve()
+
+
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))

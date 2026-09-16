@@ -1,5 +1,6 @@
 """A ready slot with a branch checked out was hijacked; never claim it."""
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from tests.conftest import git as run_git
 from warmtree import git
 from warmtree.config import Config
+from warmtree.git import GitError
 from warmtree.pool import Pool
 
 
@@ -44,6 +46,51 @@ def test_doctor_fix_marks_the_hijacked_slot_taken(pool: Pool):
     released, _ = pool.release("stray", force=True)
     assert released.state == "ready"
     assert git.head_branch(Path(released.path)) is None
+
+
+def test_doctor_never_touches_an_unregistered_directory(pool: Pool, repo: Path):
+    # A slot directory replaced by an unrelated repository must not have
+    # its branch recorded: release would later reset a stranger's repo.
+    [first, _] = pool.status()
+    shutil.rmtree(first.path)
+    run_git("init", "-q", "-b", "innocent", str(first.path), cwd=repo)
+    (Path(first.path) / "f").write_text("x\n")
+    run_git("add", "f", cwd=Path(first.path))
+    run_git(
+        "-c",
+        "user.email=x@x",
+        "-c",
+        "user.name=x",
+        "commit",
+        "-q",
+        "-m",
+        "i",
+        cwd=Path(first.path),
+    )
+
+    findings = pool.doctor(fix=True)
+    assert any("no longer a working tree" in f.problem for f in findings)
+    assert not any("checked out" in f.problem for f in findings)
+    assert pool.status()[0].state == "ready"  # untouched by --fix
+
+    impostor = pool.status()[0]
+    slot, _ = pool.take("feature")  # take must also refuse the impostor
+    assert slot.name != impostor.name
+    assert pool.status()[0].state == "ready"  # impostor entry untouched
+    assert git.head_branch(Path(impostor.path)) == "innocent"
+
+
+def test_take_records_hijacks_even_when_its_own_checkout_fails(pool: Pool):
+    # The observation must survive a failed claim: mark first, then check out.
+    [first, second] = pool.status()
+    hijack(first.path, "stray")
+    hijack(second.path, "wanted")  # taking "wanted" later must fail loudly
+
+    with pytest.raises(GitError):
+        pool.take("wanted")  # git refuses: wanted is checked out in slot-2
+
+    assert pool.taken("stray").name == first.name
+    assert pool.taken("wanted").name == second.name
 
 
 def test_take_skips_a_hijacked_slot_and_records_it(pool: Pool):
