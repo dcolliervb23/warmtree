@@ -6,6 +6,7 @@ import pytest
 
 from tests.conftest import git as run_git
 from warmtree import git
+from warmtree.cli import main
 from warmtree.config import Config
 from warmtree.pool import Pool
 
@@ -61,3 +62,33 @@ def test_refresh_fetch_without_a_remote_uses_the_local_base(repo: Path):
 
     pool.refresh(fetch=True)
     assert git.rev_parse(Path(slot.path), "HEAD") == base
+
+
+def test_cli_refresh_fetch_flag_reaches_the_pool(
+    cloned: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    origin, clone = cloned
+    monkeypatch.chdir(clone)
+    pool = Pool(clone, Config(size=1))
+    [slot] = pool.fill()
+    upstream = advance_origin(origin)
+    capsys.readouterr()
+
+    assert main(["refresh", "--fetch"]) == 0
+    assert git.rev_parse(Path(slot.path), "HEAD") == upstream
+
+
+def test_take_branches_from_the_refreshed_position(cloned: tuple[Path, Path]):
+    # A take after refresh --fetch must not drag the slot back to the
+    # stale local base by re-resolving it.
+    origin, clone = cloned
+    pool = Pool(clone, Config(size=1))
+    pool.fill()
+    upstream = advance_origin(origin)
+    pool.refresh(fetch=True)
+
+    slot, cold = pool.take("feature")
+    assert cold is False
+    assert git.rev_parse(Path(slot.path), "HEAD") == upstream

@@ -178,9 +178,11 @@ class Pool:
     ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
-        The oldest ready slot gets `branch` checked out (created from
-        `from_ref` or base if it does not exist). With no ready slot, a new
-        worktree is created the slow way and joins the pool as a taken slot.
+        The oldest ready slot gets `branch` checked out. A new branch starts
+        at `from_ref` when given, and otherwise where the slot is parked:
+        refresh positioned it on the freshest known base, and re-resolving
+        the local base here would drag the slot back to a stale commit. Only
+        the cold path, which has no parked position, resolves base itself.
         With scratch=True the branch name is generated under the claim lock,
         so two concurrent scratch takes can never pick the same name.
         """
@@ -190,18 +192,18 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
-            start = from_ref or self.base()
             ready = sorted(
                 (slot for slot in slots if slot.state == "ready"),
                 key=lambda slot: (slot.warmed or slot.created, slot.name),
             )
             if ready:
                 slot = ready[0]
-                _checkout(self.repo_root, Path(slot.path), branch, start)
+                _checkout(self.repo_root, Path(slot.path), branch, from_ref or "HEAD")
                 cold = False
             else:
                 name = _next_name(slots)
                 path = self.dir / name
+                start = from_ref or self.base()
                 git.worktree_add_branch(self.repo_root, path, branch, start)
                 slot = Slot(name=name, path=str(path), state="taken", created=_now())
                 slots.append(slot)

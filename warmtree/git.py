@@ -117,8 +117,15 @@ def ref_exists(repo: Path, ref: str) -> bool:
 
 
 def fetch(repo: Path) -> None:
-    """Fetch the default remote. A repo with no remote is a quiet no-op."""
-    run(["fetch", "--quiet"], cwd=repo)
+    """Fetch origin explicitly. A repo without an origin is a quiet no-op.
+
+    Explicit, because a bare `git fetch` follows the current branch's
+    upstream, which may be a different remote than the `origin/<base>`
+    the caller is about to resolve.
+    """
+    remotes = run(["remote"], cwd=repo).splitlines()
+    if "origin" in remotes:
+        run(["fetch", "--quiet", "origin"], cwd=repo)
 
 
 def checkout_branch(path: Path, branch: str) -> None:

@@ -75,8 +75,8 @@ warmtree release feature/login
 `take` prints only the slot path on stdout. Everything else it says goes to
 stderr, so the `cd` idiom works.
 
-Keep slots current with a nightly `warmtree refresh` from cron or Task
-Scheduler, after whatever pulls your base branch.
+Keep slots current with a nightly `warmtree refresh --fetch` from cron or
+Task Scheduler; it fetches first, so it needs no manual pull beforehand.
 
 ## Already have worktrees?
 
