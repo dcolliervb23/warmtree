@@ -114,3 +114,25 @@ def test_take_falls_back_cold_when_every_ready_slot_is_hijacked(repo: Path):
     assert cold is True
     assert slot.name != only.name
     assert pool.taken("stray").name == only.name
+
+
+def test_a_plain_directory_inside_the_repo_is_never_a_slot(repo: Path):
+    # With the pool dir configured inside the main checkout, a slot
+    # replaced by an ordinary directory shares our git dir and reports the
+    # MAIN worktree's branch. Treating it as ours would let release reset
+    # the main checkout. Doctor must report, never mark taken; take must
+    # skip it.
+    pool = Pool(repo, Config(size=1, dir="pool-inside"))
+    [slot] = pool.fill()
+    shutil.rmtree(slot.path)
+    Path(slot.path).mkdir()
+    (Path(slot.path) / "innocent.txt").write_text("not a worktree\n")
+
+    findings = pool.doctor(fix=True)
+    assert any("no longer a working tree" in f.problem for f in findings)
+    assert not any("checked out" in f.problem for f in findings)
+    assert pool.status()[0].state == "ready"
+
+    taken, cold = pool.take("feature")
+    assert taken.name != slot.name
+    assert cold is True
