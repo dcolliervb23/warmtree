@@ -24,23 +24,24 @@ def allow_hooks_reset():
 
 
 def test_pool_operations_do_not_run_hooks(repo: Path):
-    marker = repo / "hook-ran"
-    install_post_checkout(repo, f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+    # The marker is relative: hooks run with the new worktree as cwd, and a
+    # relative path survives the Windows sh that runs hook scripts.
+    install_post_checkout(repo, "#!/bin/sh\ntouch .hook-ran\nexit 0\n")
 
     pool = Pool(repo, Config(size=1))
-    pool.fill()
+    [slot] = pool.fill()
     pool.take("feature")
-    assert not marker.exists()
+    assert not (Path(slot.path) / ".hook-ran").exists()
+    assert not (repo / ".hook-ran").exists()
 
 
 def test_git_hooks_true_runs_them(repo: Path, allow_hooks_reset):
-    marker = repo / "hook-ran"
-    install_post_checkout(repo, f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+    install_post_checkout(repo, "#!/bin/sh\ntouch .hook-ran\nexit 0\n")
 
     git.allow_hooks(True)
     pool = Pool(repo, Config(size=1, git_hooks=True))
-    pool.fill()
-    assert marker.exists()
+    [slot] = pool.fill()
+    assert (Path(slot.path) / ".hook-ran").exists()
 
 
 def test_a_lingering_hook_child_cannot_hang_the_pool(repo: Path):
