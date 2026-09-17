@@ -11,14 +11,31 @@ call even after git itself exits. Per-slot setup belongs to the config's
 `allow_hooks(True)` (from `[pool] git_hooks = true`) restores them.
 """
 
+import atexit
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-# A path that does not exist: git finds no hooks there and runs none.
-_NO_HOOKS_DIR = str(Path(tempfile.gettempdir()) / "warmtree-hooks-disabled")
+_no_hooks_dir: str | None = None
 
 _hooks_allowed = False
+
+
+def _no_hooks_path() -> str:
+    """A hooks path nothing else can own.
+
+    A predictable name under the shared temp directory could be created by
+    another user with hooks of their own, which git would then run while we
+    promise hooks are off. So the path lives inside a fresh private
+    directory (mkdtemp, mode 0700) and is itself never created.
+    """
+    global _no_hooks_dir
+    if _no_hooks_dir is None:
+        private = tempfile.mkdtemp(prefix="warmtree-no-hooks-")
+        atexit.register(shutil.rmtree, private, ignore_errors=True)
+        _no_hooks_dir = str(Path(private) / "hooks")
+    return _no_hooks_dir
 
 
 class GitError(Exception):
@@ -33,7 +50,7 @@ def allow_hooks(allowed: bool) -> None:
 
 def run(args: list[str], cwd: Path) -> str:
     """Run `git <args>` in cwd and return stripped stdout."""
-    prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_NO_HOOKS_DIR}"]
+    prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_no_hooks_path()}"]
     result = subprocess.run(
         ["git", *prefix, *args],
         cwd=cwd,
