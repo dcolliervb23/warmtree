@@ -7,8 +7,11 @@ description: Get an isolated git worktree for a branch in under a second from th
 
 This repo keeps a pool of pre-warmed git worktrees called slots: dependencies
 installed, env files copied, parked on the base branch with a detached HEAD.
-`warmtree take` hands you one instantly. In a repo that has a `.warmtree.toml`,
-never run `git worktree add` yourself.
+`warmtree take` hands you one instantly.
+
+Where `.warmtree.toml` exists, warmtree is the default, not a fallback:
+never run `git worktree add` yourself, and start every task that needs a
+branch with `warmtree which`.
 
 All commands work from anywhere inside the repo, including inside a slot.
 `take` prints only the slot path on stdout; everything else goes to stderr.
@@ -86,8 +89,17 @@ the user if it keeps happening, and suggest a larger `warmtree size`.
 ## 4. Work
 
 Inside the slot everything is ordinary git: edit, commit, push, open a pull
-request. Do not delete the slot directory and do not run `git worktree remove`
-on it. The slot belongs to the pool.
+request. Slots are pool property with house rules:
+
+- Do not delete the slot directory or run `git worktree remove` on it.
+- Verify the slot's branch before operating in it (`warmtree which`, or
+  `git -C <slot path> branch --show-current`); if the branch changed under
+  you, stop and check `warmtree status` before continuing.
+- Target the slot path explicitly (`warmtree exec`, `git -C <slot path>`)
+  rather than relying on an earlier `cd`; a command that silently runs in
+  the main worktree is how unrelated changes leak into PRs.
+- The branch name is the durable identity, not the slot number: slots are
+  recycled, branches are yours.
 
 For one command in a branch's slot, skip the cd entirely:
 
