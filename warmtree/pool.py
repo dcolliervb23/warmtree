@@ -178,9 +178,11 @@ class Pool:
     ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
-        The oldest ready slot gets `branch` checked out (created from
-        `from_ref` or base if it does not exist). With no ready slot, a new
-        worktree is created the slow way and joins the pool as a taken slot.
+        The oldest ready slot gets `branch` checked out. A new branch starts
+        at `from_ref` when given, and otherwise where the slot is parked:
+        refresh positioned it on the freshest known base, and re-resolving
+        the local base here would drag the slot back to a stale commit. Only
+        the cold path, which has no parked position, resolves base itself.
         With scratch=True the branch name is generated under the claim lock,
         so two concurrent scratch takes can never pick the same name.
         """
@@ -190,7 +192,6 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
-            start = from_ref or self.base()
             ready = sorted(
                 (slot for slot in slots if slot.state == "ready"),
                 key=lambda slot: (slot.warmed or slot.created, slot.name),
@@ -228,11 +229,14 @@ class Pool:
                 self.save_state(slots)
             if claimed:
                 slot = claimed
-                _checkout(self.repo_root, Path(slot.path), branch, start)
+                _checkout(
+                    self.repo_root, Path(slot.path), branch, from_ref or "HEAD"
+                )
                 cold = False
             else:
                 name = _next_name(slots)
                 path = self.dir / name
+                start = from_ref or self.base()
                 git.worktree_add_branch(self.repo_root, path, branch, start)
                 slot = Slot(name=name, path=str(path), state="taken", created=_now())
                 slots.append(slot)
@@ -312,13 +316,25 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def refresh(self) -> list[Refreshed]:
+    def refresh(self, fetch: bool = False) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.
 
         Each slot is moved to the current base commit and its copied files
         are refreshed. The run commands only execute again when a lockfile
         hash changed or the slot's last warm failed.
+
+        With fetch=True the remote is fetched first and slots park on
+        `origin/<base>` where it exists, so they track the remote even when
+        the local base branch is behind. The local branch itself is never
+        moved; the main worktree stays exactly as the user left it.
         """
+        base_ref = self.base()
+        if fetch:
+            git.fetch(self.repo_root)
+            remote_ref = f"origin/{base_ref}"
+            if git.ref_exists(self.repo_root, remote_ref):
+                base_ref = remote_ref
+
         with self.locked():
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
@@ -332,7 +348,7 @@ class Pool:
                 was_stale = slot.state == "stale"
                 slot.state = "warming"
                 self.save_state(slots)
-                base_commit = git.rev_parse(self.repo_root, self.base())
+                base_commit = git.rev_parse(self.repo_root, base_ref)
 
             path = Path(slot.path)
             moved = git.rev_parse(path, "HEAD") != base_commit

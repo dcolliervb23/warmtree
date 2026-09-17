@@ -126,6 +126,27 @@ def branch_exists(repo: Path, name: str) -> bool:
     return True
 
 
+def ref_exists(repo: Path, ref: str) -> bool:
+    """Whether `ref` resolves to a commit; remote refs included."""
+    try:
+        run(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], cwd=repo)
+    except GitError:
+        return False
+    return True
+
+
+def fetch(repo: Path) -> None:
+    """Fetch origin explicitly. A repo without an origin is a quiet no-op.
+
+    Explicit, because a bare `git fetch` follows the current branch's
+    upstream, which may be a different remote than the `origin/<base>`
+    the caller is about to resolve.
+    """
+    remotes = run(["remote"], cwd=repo).splitlines()
+    if "origin" in remotes:
+        run(["fetch", "--quiet", "origin"], cwd=repo)
+
+
 def checkout_branch(path: Path, branch: str) -> None:
     run(["checkout", "--quiet", branch], cwd=path)
 
