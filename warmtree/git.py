@@ -94,6 +94,32 @@ def head_branch(path: Path) -> str | None:
         return None
 
 
+def owns_worktree(repo: Path, path: Path) -> bool:
+    """Whether `path` is itself a working tree of this repository.
+
+    Two conditions, both required. The shared git dir must be ours:
+    `git worktree list` keeps listing a path whose directory was replaced,
+    so registration alone proves nothing. And git's reported top level must
+    be `path` itself: a plain subdirectory inside one of our worktrees
+    shares our git dir without being a worktree root, and mistaking one
+    for a slot would let release reset the tree that contains it.
+    """
+    try:
+        theirs = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=path
+        )
+        ours = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=repo
+        )
+        top = run(["rev-parse", "--show-toplevel"], cwd=path)
+    except GitError:
+        return False
+    return (
+        Path(theirs).resolve() == Path(ours).resolve()
+        and Path(top).resolve() == path.resolve()
+    )
+
+
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))

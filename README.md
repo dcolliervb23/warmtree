@@ -122,7 +122,7 @@ pool's fresh slots do the work.
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk; with `--json` it adds a `du_bytes` field per slot. |
-| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, untracked directories in the pool. `--fix` applies the safe repairs. |
+| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, ready slots hijacked by a stray checkout, untracked directories in the pool. `--fix` applies the safe repairs. |
 
 Slot states:
 

@@ -93,10 +93,12 @@ def test_unregistered_worktree_is_reported_not_fixed(repo: Path):
     [slot] = pool.fill()
     shutil.rmtree(repo / ".git" / "worktrees" / Path(slot.path).name)
 
-    [finding] = pool.doctor(fix=True)
-    assert finding.slot == slot.name
-    assert not finding.fixed
-    assert "repair" in finding.hint
+    findings = pool.doctor(fix=True)
+    # Losing the registration also severs ownership, so both drift findings
+    # fire; neither is ever auto-fixed.
+    assert {f.slot for f in findings} == {slot.name}
+    assert not any(f.fixed for f in findings)
+    assert any("repair" in f.hint for f in findings)
 
 
 def test_doctor_cli_healthy_and_broken(
