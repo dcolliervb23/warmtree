@@ -229,9 +229,7 @@ class Pool:
                 self.save_state(slots)
             if claimed:
                 slot = claimed
-                _checkout(
-                    self.repo_root, Path(slot.path), branch, from_ref or "HEAD"
-                )
+                _checkout(self.repo_root, Path(slot.path), branch, from_ref or "HEAD")
                 cold = False
             else:
                 name = _next_name(slots)
