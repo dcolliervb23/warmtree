@@ -532,7 +532,9 @@ def _human(size: int) -> str:
 
 def _pool() -> Pool:
     root = git.repo_root(Path.cwd())
-    return Pool(root, config.load(root), log=note)
+    cfg = config.load(root)
+    git.allow_hooks(cfg.git_hooks)
+    return Pool(root, cfg, log=note)
 
 
 def _spawn_background_fill(repo_root: Path) -> None:

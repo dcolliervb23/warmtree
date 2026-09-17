@@ -26,13 +26,23 @@ class Config:
     run: tuple[str, ...] = ()
     copy: tuple[str, ...] = ()
     env: bool = True
+    # Pool operations skip the repo's git hooks by default: a hook that
+    # lingers (telemetry, spawned children) can hang a take mid-claim, and
+    # per-slot setup belongs to `run` and `copy`. Set true to run them.
+    git_hooks: bool = False
 
 
 # Which keys live in which table, and the TOML type each must have.
 # Anything not listed here is a typo, and typos are errors rather than silent
 # defaults so a misspelled `run` never quietly skips warming.
 _SCHEMA: dict[str, dict[str, type]] = {
-    "pool": {"size": int, "base": str, "dir": str, "lockfiles": list},
+    "pool": {
+        "size": int,
+        "base": str,
+        "dir": str,
+        "lockfiles": list,
+        "git_hooks": bool,
+    },
     "warm": {"run": list, "copy": list, "env": bool},
 }
 

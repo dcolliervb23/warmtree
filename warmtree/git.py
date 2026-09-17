@@ -2,20 +2,40 @@
 
 Each function runs one git command and returns the little we need. Nothing
 here is mocked in tests; they run against real temporary repos.
+
+By default every command runs with the repo's hooks disabled: pool
+operations are plumbing, and a checkout hook that lingers — telemetry that
+spawns children, say — holds git's inherited pipes and hangs the captured
+call even after git itself exits. Per-slot setup belongs to the config's
+`run` and `copy`, not to hooks firing while the pool moves its furniture.
+`allow_hooks(True)` (from `[pool] git_hooks = true`) restores them.
 """
 
 import subprocess
+import tempfile
 from pathlib import Path
+
+# A path that does not exist: git finds no hooks there and runs none.
+_NO_HOOKS_DIR = str(Path(tempfile.gettempdir()) / "warmtree-hooks-disabled")
+
+_hooks_allowed = False
 
 
 class GitError(Exception):
     """git exited non-zero. The message is git's own stderr."""
 
 
+def allow_hooks(allowed: bool) -> None:
+    """Let the repo's git hooks run during pool operations."""
+    global _hooks_allowed
+    _hooks_allowed = allowed
+
+
 def run(args: list[str], cwd: Path) -> str:
     """Run `git <args>` in cwd and return stripped stdout."""
+    prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_NO_HOOKS_DIR}"]
     result = subprocess.run(
-        ["git", *args],
+        ["git", *prefix, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
