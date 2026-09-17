@@ -309,7 +309,16 @@ def _report_instructions(
     prefix = "~/" if user else ""
     for result in results:
         if result.action == "skipped":
-            note(f"{result.target.tool} keeps instructions in app settings; skipped")
+            if user:
+                note(
+                    f"{result.target.tool} keeps user-level rules in app "
+                    "settings; skipped"
+                )
+            else:
+                note(
+                    f"{result.target.tool} uses .cursor/rules (.mdc files), "
+                    "which warmtree does not manage; skipped"
+                )
             continue
         where = result.path.relative_to(root).as_posix()
         print(f"{result.action}: {result.target.tool} instructions at {prefix}{where}")

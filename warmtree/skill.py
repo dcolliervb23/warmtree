@@ -169,8 +169,9 @@ worktrees. Prefer the pool over creating checkouts from scratch:
 
 - Begin branch work with `warmtree which`, and check capacity with
   `warmtree size` before fanning out.
-- Claim a workspace with `cd "$(warmtree take <branch>)"` instead of
-  `git worktree add` or a fresh checkout; return it with
+- Claim a workspace instead of running `git worktree add` or a fresh
+  checkout: `cd "$(warmtree take <branch>)"` in bash or zsh,
+  `cd (warmtree take <branch>)` in PowerShell. Return it with
   `warmtree release <branch>` once the branch is merged or abandoned.
 - The `warmtree` skill documents the full workflow.
 
