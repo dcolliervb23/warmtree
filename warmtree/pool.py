@@ -92,6 +92,9 @@ class Pool:
         self.dir = pool_dir(repo_root, config)
         self.state_path = self.dir / STATE_FILE
         self.log = log or (lambda message: None)
+        # Hook policy follows the pool's config wherever the pool is built:
+        # the CLI, warmtree size's fresh Pool, or the API directly.
+        git.allow_hooks(config.git_hooks)
 
     def base(self) -> str:
         """Branch slots park on: configured, or detected from the repo."""

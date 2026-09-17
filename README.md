@@ -148,6 +148,7 @@ size = 2                       # slots to keep ready; taken slots do not count
 # base = "main"                # branch slots park on; default: the repo's default branch
 # dir = "../.warmtree/app"     # where slots live; default: ../.warmtree/<repo name>
 lockfiles = ["package-lock.json", "uv.lock"]  # re-warm only when one of these changes
+# git_hooks = false            # run the repo's git hooks during pool operations
 
 [warm]
 run = ["npm ci"]               # commands run inside a slot at fill and refresh time
@@ -168,9 +169,22 @@ Details worth knowing:
   `run` only when a hash differs.
 - `warmtree size N` edits the `size` line in place. Your comments and other
   keys are left alone.
+- Pool operations skip the repo's git hooks by default. A checkout hook
+  that lingers — telemetry spawning children, say — can hang a `take`
+  mid-claim, and per-slot setup belongs in `run` and `copy` anyway. Set
+  `git_hooks = true` if your hooks are quick and you want them.
 - Unknown keys are errors, so a typo never silently disables warming.
 
 ## Using it with coding agents
+
+Dogfooding note: agents sometimes treat warmtree as a fallback rather than
+the default. A line in the repo's agent instructions (`CLAUDE.md`,
+`AGENTS.md`, `copilot-instructions.md`) settles it:
+
+> This repo pools worktrees with warmtree. Never run `git worktree add`;
+> start every branch task with `warmtree which`, check capacity with
+> `warmtree size`, and claim workspaces with `warmtree take`.
+
 
 warmtree ships an [Agent Skill](https://agentskills.io): a short set of
 instructions an agent loads when the task calls for an isolated workspace. It

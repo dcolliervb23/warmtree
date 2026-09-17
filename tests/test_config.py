@@ -101,3 +101,10 @@ def test_starter_toml_lists_lockfiles_and_never_guesses_run():
 
 def test_starter_toml_round_trips_to_defaults():
     assert config.parse(config.starter_toml([])) == Config()
+
+
+def test_starter_toml_mentions_every_config_key():
+    # A key missing from the starter file is a key users never discover.
+    text = config.starter_toml([])
+    for key in ("size", "base", "dir", "lockfiles", "git_hooks", "run", "copy", "env"):
+        assert key in text
