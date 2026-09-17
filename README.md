@@ -106,7 +106,8 @@ pool's fresh slots do the work.
 
 | Command | What it does |
 |---|---|
-| `warmtree init [--force] [--no-skill] [--user-skill]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. Installs the agent skill for any coding agent it detects; `--user-skill` puts it in your home directory instead so the repo never contains it, `--no-skill` skips it entirely. |
+| `warmtree init [--force] [--no-skill] [--user-skill]` | Write a starter `.warmtree.toml`. Pre-fills `lockfiles` from what it finds in the repo. Never guesses your install command. Installs the agent skill for any coding agent it detects; `--user-skill` puts it in your home directory instead so the repo never contains it, `--no-skill` skips it entirely. Also adds the prefer-warmtree block to your user-level agent instructions (`--no-instructions` skips that). |
+| `warmtree instructions [--repo] [--tool T]` | Add a marked prefer-warmtree block to agent instruction files — your user-level ones by default (`~/.claude/CLAUDE.md`, `~/.copilot/copilot-instructions.md`, `~/.codex/AGENTS.md`), or the repo's with `--repo`. Only the marked block is ever touched; re-runs update it in place. |
 | `warmtree skill [--tool T] [--user] [--force]` | Install or refresh the agent skill in the tool folders this repo uses, or in the ones named with `--tool`. `--user` installs into the tools' personal skills folders in your home directory (`~/.claude/skills`, `~/.copilot/skills`, `~/.codex/skills`, `~/.cursor/skills`) so no repo ever contains the file; it works outside a repo and covers every repo at once. Never overwrites an edited copy without `--force`. |
 | `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch, with `copy` files copied in and `run` commands executed. |
 | `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Creates `<branch>` there (from `REF` or the base branch) or checks it out if it already exists. Prints the path, then refills the pool. |
@@ -177,13 +178,16 @@ Details worth knowing:
 
 ## Using it with coding agents
 
-Dogfooding note: agents sometimes treat warmtree as a fallback rather than
-the default. A line in the repo's agent instructions (`CLAUDE.md`,
-`AGENTS.md`, `copilot-instructions.md`) settles it:
-
-> This repo pools worktrees with warmtree. Never run `git worktree add`;
-> start every branch task with `warmtree which`, check capacity with
-> `warmtree size`, and claim workspaces with `warmtree take`.
+Skills teach agents how to use warmtree; instructions change what they
+reach for by default. Without the latter, agents keep running
+`git worktree add` from habit. `warmtree init` therefore also maintains a
+marked prefer-warmtree block in your user-level agent instructions, and
+`warmtree instructions --repo` writes the same block into a repo's own
+`CLAUDE.md`, `AGENTS.md`, or `.github/copilot-instructions.md` for
+everyone who works there. The block is a strong preference, not a ban:
+agents may still use plain git when warmtree is unavailable or a task
+calls for it. Note that running agent sessions load instructions at
+startup; restart or reload them after installing.
 
 
 warmtree ships an [Agent Skill](https://agentskills.io): a short set of
