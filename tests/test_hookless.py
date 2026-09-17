@@ -1,0 +1,59 @@
+"""Pool operations skip the repo's git hooks unless configured to run them."""
+
+import time
+from pathlib import Path
+
+import pytest
+
+from warmtree import git
+from warmtree.config import Config, parse
+from warmtree.pool import Pool
+
+
+def install_post_checkout(repo: Path, script: str) -> None:
+    hook = repo / ".git" / "hooks" / "post-checkout"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(script)
+    hook.chmod(0o755)
+
+
+@pytest.fixture
+def allow_hooks_reset():
+    yield
+    git.allow_hooks(False)
+
+
+def test_pool_operations_do_not_run_hooks(repo: Path):
+    marker = repo / "hook-ran"
+    install_post_checkout(repo, f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
+    pool.take("feature")
+    assert not marker.exists()
+
+
+def test_git_hooks_true_runs_them(repo: Path, allow_hooks_reset):
+    marker = repo / "hook-ran"
+    install_post_checkout(repo, f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+
+    git.allow_hooks(True)
+    pool = Pool(repo, Config(size=1, git_hooks=True))
+    pool.fill()
+    assert marker.exists()
+
+
+def test_a_lingering_hook_child_cannot_hang_the_pool(repo: Path):
+    # The dogfooded hang: a hook backgrounds a process that inherits git's
+    # pipes, and the captured call blocks long after git itself exited.
+    # With hooks skipped the fill must return promptly.
+    install_post_checkout(repo, "#!/bin/sh\nsleep 30 &\nexit 0\n")
+
+    start = time.monotonic()
+    Pool(repo, Config(size=1)).fill()
+    assert time.monotonic() - start < 10
+
+
+def test_config_accepts_git_hooks():
+    assert parse("[pool]\ngit_hooks = true\n").git_hooks is True
+    assert parse("").git_hooks is False
