@@ -75,8 +75,8 @@ warmtree release feature/login
 `take` prints only the slot path on stdout. Everything else it says goes to
 stderr, so the `cd` idiom works.
 
-Keep slots current with a nightly `warmtree refresh` from cron or Task
-Scheduler, after whatever pulls your base branch.
+Keep slots current with a nightly `warmtree refresh --fetch` from cron or
+Task Scheduler; it fetches first, so it needs no manual pull beforehand.
 
 ## Already have worktrees?
 
@@ -117,12 +117,12 @@ pool's fresh slots do the work.
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. `--json` prints `slot`, `branch`, `branch_deleted`. |
 | `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. Does not pin the slot: do not release a branch while a command still runs in it. |
 | `warmtree adopt <path>` | Move an existing worktree into the pool as a taken slot. Its branch, uncommitted changes, and installed dependencies come with it; a later `release` recycles them. Prints the new path. |
-| `warmtree refresh` | Move every waiting slot to the current base commit and re-copy files. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
+| `warmtree refresh [--fetch]` | Move every waiting slot to the current base commit and re-copy files. `--fetch` fetches first and parks slots on `origin/<base>`, so they track the remote even when your local base branch is behind; your own checkout is never touched. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk; with `--json` it adds a `du_bytes` field per slot. |
-| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, untracked directories in the pool. `--fix` applies the safe repairs. |
+| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, ready slots hijacked by a stray checkout, untracked directories in the pool. `--fix` applies the safe repairs. |
 
 Slot states:
 

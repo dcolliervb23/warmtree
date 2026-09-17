@@ -181,9 +181,11 @@ class Pool:
     ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
-        The oldest ready slot gets `branch` checked out (created from
-        `from_ref` or base if it does not exist). With no ready slot, a new
-        worktree is created the slow way and joins the pool as a taken slot.
+        The oldest ready slot gets `branch` checked out. A new branch starts
+        at `from_ref` when given, and otherwise where the slot is parked:
+        refresh positioned it on the freshest known base, and re-resolving
+        the local base here would drag the slot back to a stale commit. Only
+        the cold path, which has no parked position, resolves base itself.
         With scratch=True the branch name is generated under the claim lock,
         so two concurrent scratch takes can never pick the same name.
         """
@@ -193,18 +195,49 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
-            start = from_ref or self.base()
             ready = sorted(
                 (slot for slot in slots if slot.state == "ready"),
                 key=lambda slot: (slot.warmed or slot.created, slot.name),
             )
-            if ready:
-                slot = ready[0]
-                _checkout(self.repo_root, Path(slot.path), branch, start)
+            # A ready slot must be parked detached. One with a branch checked
+            # out was hijacked behind warmtree's back (a manual checkout in
+            # the slot); claiming it would switch branches under whoever did
+            # that. Record what git says and leave it for release to sort out.
+            claimed = None
+            saw_hijack = False
+            for candidate in ready:
+                cpath = Path(candidate.path)
+                if not git.owns_worktree(self.repo_root, cpath):
+                    # Not our worktree any more; never claim it, never
+                    # record its branch. Doctor reports it.
+                    self.log(
+                        f"{candidate.name} is not a working tree of this "
+                        "repository; skipping it"
+                    )
+                    continue
+                head = git.head_branch(cpath)
+                if head is None:
+                    claimed = candidate
+                    break
+                candidate.state = "taken"
+                candidate.branch = head
+                saw_hijack = True
+                self.log(
+                    f"{candidate.name} was marked ready but has {head} "
+                    "checked out; marked taken instead"
+                )
+            if saw_hijack:
+                # Persist the observation now: a failure in the checkout
+                # below must not lose what git told us about these slots.
+                self.save_state(slots)
+            if claimed:
+                slot = claimed
+                _checkout(self.repo_root, Path(slot.path), branch, from_ref or "HEAD")
                 cold = False
             else:
                 name = _next_name(slots)
                 path = self.dir / name
+                start = from_ref or self.base()
                 git.worktree_add_branch(self.repo_root, path, branch, start)
                 slot = Slot(name=name, path=str(path), state="taken", created=_now())
                 slots.append(slot)
@@ -284,13 +317,25 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def refresh(self) -> list[Refreshed]:
+    def refresh(self, fetch: bool = False) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.
 
         Each slot is moved to the current base commit and its copied files
         are refreshed. The run commands only execute again when a lockfile
         hash changed or the slot's last warm failed.
+
+        With fetch=True the remote is fetched first and slots park on
+        `origin/<base>` where it exists, so they track the remote even when
+        the local base branch is behind. The local branch itself is never
+        moved; the main worktree stays exactly as the user left it.
         """
+        base_ref = self.base()
+        if fetch:
+            git.fetch(self.repo_root)
+            remote_ref = f"origin/{base_ref}"
+            if git.ref_exists(self.repo_root, remote_ref):
+                base_ref = remote_ref
+
         with self.locked():
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
@@ -304,7 +349,7 @@ class Pool:
                 was_stale = slot.state == "stale"
                 slot.state = "warming"
                 self.save_state(slots)
-                base_commit = git.rev_parse(self.repo_root, self.base())
+                base_commit = git.rev_parse(self.repo_root, base_ref)
 
             path = Path(slot.path)
             moved = git.rev_parse(path, "HEAD") != base_commit
@@ -368,9 +413,11 @@ class Pool:
     def doctor(self, fix: bool = False) -> list[Finding]:
         """Compare state.json against git and the filesystem, report drift.
 
-        With fix=True the one safe repair is applied: a state entry whose
+        With fix=True the two safe repairs are applied: a state entry whose
         directory is gone is removed from git's registration and, once git
-        confirms it is unregistered, dropped from state. Everything else is
+        confirms it is unregistered, dropped from state; and a registered
+        ready slot with a branch checked out is marked taken on that branch,
+        which preserves whatever work is sitting there. Everything else is
         reported with a hint and left alone: a warming slot may belong to a
         live fill or refresh in another process, so repairing it here could
         start a second warm in the same directory.
@@ -418,7 +465,8 @@ class Pool:
                     )
                     continue
                 kept.append(slot)
-                if path.resolve() not in registered:
+                is_registered = path.resolve() in registered
+                if not is_registered:
                     findings.append(
                         Finding(
                             slot.name,
@@ -438,6 +486,43 @@ class Pool:
                             "and `warmtree fill`",
                         )
                     )
+                # Only for directories that really are our worktrees: a
+                # replaced directory might be an unrelated repository, and
+                # recording its branch would let release reset it later.
+                # Registration is not enough — git keeps listing a replaced
+                # path — so ownership is checked through the shared git dir.
+                if slot.state == "ready" and not git.owns_worktree(
+                    self.repo_root, path
+                ):
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "directory is no longer a working tree of this repository",
+                            hint="something replaced it; "
+                            f"`warmtree remove {slot.name} --force` "
+                            "and `warmtree fill`",
+                        )
+                    )
+                elif slot.state == "ready":
+                    head = git.head_branch(path)
+                    if head is not None:
+                        # Someone checked a branch out in a parked slot
+                        # behind warmtree's back. Marking it taken keeps
+                        # their work; re-detaching would destroy it.
+                        if fix:
+                            slot.state = "taken"
+                            slot.branch = head
+                            changed = True
+                        findings.append(
+                            Finding(
+                                slot.name,
+                                f"marked ready but has {head} checked out",
+                                fixed=fix,
+                                hint=""
+                                if fix
+                                else "--fix marks it taken so release can recycle it",
+                            )
+                        )
             known = {Path(slot.path).resolve() for slot in kept}
             if self.dir.is_dir():
                 for child in sorted(self.dir.iterdir()):

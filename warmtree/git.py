@@ -131,6 +131,32 @@ def head_branch(path: Path) -> str | None:
         return None
 
 
+def owns_worktree(repo: Path, path: Path) -> bool:
+    """Whether `path` is itself a working tree of this repository.
+
+    Two conditions, both required. The shared git dir must be ours:
+    `git worktree list` keeps listing a path whose directory was replaced,
+    so registration alone proves nothing. And git's reported top level must
+    be `path` itself: a plain subdirectory inside one of our worktrees
+    shares our git dir without being a worktree root, and mistaking one
+    for a slot would let release reset the tree that contains it.
+    """
+    try:
+        theirs = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=path
+        )
+        ours = run(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=repo
+        )
+        top = run(["rev-parse", "--show-toplevel"], cwd=path)
+    except GitError:
+        return False
+    return (
+        Path(theirs).resolve() == Path(ours).resolve()
+        and Path(top).resolve() == path.resolve()
+    )
+
+
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))
@@ -142,6 +168,27 @@ def branch_exists(repo: Path, name: str) -> bool:
     except GitError:
         return False
     return True
+
+
+def ref_exists(repo: Path, ref: str) -> bool:
+    """Whether `ref` resolves to a commit; remote refs included."""
+    try:
+        run(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], cwd=repo)
+    except GitError:
+        return False
+    return True
+
+
+def fetch(repo: Path) -> None:
+    """Fetch origin explicitly. A repo without an origin is a quiet no-op.
+
+    Explicit, because a bare `git fetch` follows the current branch's
+    upstream, which may be a different remote than the `origin/<base>`
+    the caller is about to resolve.
+    """
+    remotes = run(["remote"], cwd=repo).splitlines()
+    if "origin" in remotes:
+        run(["fetch", "--quiet", "origin"], cwd=repo)
 
 
 def checkout_branch(path: Path, branch: str) -> None:
