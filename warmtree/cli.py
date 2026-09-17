@@ -78,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="install the agent skill into your home directory instead of "
         "the repo, so the repo never contains it",
     )
+    init.add_argument(
+        "--no-instructions",
+        action="store_true",
+        help="do not add the prefer-warmtree block to your user-level "
+        "agent instructions",
+    )
     init.set_defaults(func=cmd_init)
 
     skill_cmd = commands.add_parser(
@@ -99,6 +105,25 @@ def build_parser() -> argparse.ArgumentParser:
         "directory instead of the repo, so no repo ever contains the file",
     )
     skill_cmd.set_defaults(func=cmd_skill)
+
+    instructions = commands.add_parser(
+        "instructions",
+        help="add a prefer-warmtree block to agent instruction files",
+    )
+    instructions.add_argument(
+        "--repo",
+        action="store_true",
+        help="write into this repo's instruction files (CLAUDE.md, "
+        "AGENTS.md, .github/copilot-instructions.md) instead of your "
+        "user-level ones",
+    )
+    instructions.add_argument(
+        "--tool",
+        action="append",
+        choices=skill.TOOL_KEYS,
+        help="write for this tool even if it was not detected; repeatable",
+    )
+    instructions.set_defaults(func=cmd_instructions)
 
     fill = commands.add_parser("fill", help="create any missing slots")
     fill.set_defaults(func=cmd_fill)
@@ -233,7 +258,61 @@ def cmd_init(args: argparse.Namespace) -> int:
                 "e.g. `warmtree skill --tool claude` "
                 f"(tools: {', '.join(skill.TOOL_KEYS)})"
             )
+    if not args.no_instructions:
+        # Skills teach the workflow; instructions change the default.
+        # Without this block agents keep reaching for `git worktree add`.
+        home = Path.home()
+        user_targets = skill.detect_user(home)
+        if user_targets:
+            _report_instructions(
+                home,
+                skill.install_instructions(home, user_targets, user=True),
+                user=True,
+            )
     return 0
+
+
+def cmd_instructions(args: argparse.Namespace) -> int:
+    if args.repo:
+        root = git.repo_root(Path.cwd())
+        targets = (
+            [skill.by_tool(key) for key in args.tool]
+            if args.tool
+            else skill.detect(root)
+        )
+    else:
+        root = Path.home()
+        targets = (
+            [skill.by_tool(key) for key in args.tool]
+            if args.tool
+            else skill.detect_user(root)
+        )
+    if not targets:
+        where = "this repo" if args.repo else "your home directory"
+        fail(
+            f"no agent config detected in {where}; pick one with e.g. "
+            f"`warmtree instructions --tool claude` "
+            f"(tools: {', '.join(skill.TOOL_KEYS)})"
+        )
+        return 1
+    _report_instructions(
+        root,
+        skill.install_instructions(root, targets, user=not args.repo),
+        user=not args.repo,
+    )
+    return 0
+
+
+def _report_instructions(
+    root: Path, results: list[skill.InstructionsResult], user: bool = False
+) -> None:
+    prefix = "~/" if user else ""
+    for result in results:
+        if result.action == "skipped":
+            note(f"{result.target.tool} keeps instructions in app settings; skipped")
+            continue
+        where = result.path.relative_to(root).as_posix()
+        print(f"{result.action}: {result.target.tool} instructions at {prefix}{where}")
 
 
 def cmd_skill(args: argparse.Namespace) -> int:

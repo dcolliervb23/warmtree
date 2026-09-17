@@ -37,6 +37,8 @@ class Target:
     markers: tuple[str, ...]  # files or folders that mean the tool is used here
     skills_dir: str  # where that tool reads project skills from
     user_dir: str  # folder in the home directory the tool keeps its config in
+    instructions_file: str | None = None  # repo-level agent instructions
+    user_instructions_file: str | None = None  # home-level agent instructions
 
     @property
     def user_skills_dir(self) -> str:
@@ -47,7 +49,13 @@ class Target:
 # A bare .github folder is not a marker: nearly every repo has one for CI.
 TARGETS = (
     Target(
-        "claude", "Claude Code", ("CLAUDE.md", ".claude"), ".claude/skills", ".claude"
+        "claude",
+        "Claude Code",
+        ("CLAUDE.md", ".claude"),
+        ".claude/skills",
+        ".claude",
+        "CLAUDE.md",
+        ".claude/CLAUDE.md",
     ),
     Target(
         "copilot",
@@ -55,8 +63,20 @@ TARGETS = (
         (".github/copilot-instructions.md",),
         ".github/skills",
         ".copilot",
+        ".github/copilot-instructions.md",
+        ".copilot/copilot-instructions.md",
     ),
-    Target("codex", "Codex", ("AGENTS.md", ".agents"), ".agents/skills", ".codex"),
+    Target(
+        "codex",
+        "Codex",
+        ("AGENTS.md", ".agents"),
+        ".agents/skills",
+        ".codex",
+        "AGENTS.md",
+        ".codex/AGENTS.md",
+    ),
+    # Cursor keeps user-level rules in app settings, not a file, and its
+    # repo rules use a directory of .mdc files; instructions are skipped.
     Target("cursor", "Cursor", (".cursor",), ".cursor/skills", ".cursor"),
 )
 
@@ -129,4 +149,78 @@ def install(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
         results.append(Installed(target, path, action))
+    return results
+
+
+INSTRUCTIONS_BEGIN = "<!-- warmtree:instructions -->"
+INSTRUCTIONS_END = "<!-- /warmtree:instructions -->"
+
+# The paragraph `warmtree instructions` maintains inside agent instruction
+# files. Skills describe how to use warmtree; this changes what an agent
+# reaches for by default. A strong preference, deliberately not a ban.
+INSTRUCTIONS = """\
+## Worktrees: prefer warmtree where a repo has it
+
+This block is managed by `warmtree instructions`; edits inside it are
+overwritten on refresh.
+
+When a repository contains `.warmtree.toml`, it pools pre-warmed git
+worktrees. Prefer the pool over creating checkouts from scratch:
+
+- Begin branch work with `warmtree which`, and check capacity with
+  `warmtree size` before fanning out.
+- Claim a workspace with `cd "$(warmtree take <branch>)"` instead of
+  `git worktree add` or a fresh checkout; return it with
+  `warmtree release <branch>` once the branch is merged or abandoned.
+- The `warmtree` skill documents the full workflow.
+
+This is a strong preference, not a prohibition: use plain git when warmtree
+is unavailable, the pool is broken, or the task genuinely calls for it.
+"""
+
+
+@dataclass(frozen=True)
+class InstructionsResult:
+    target: Target
+    path: Path
+    action: str  # written | updated | current | skipped
+
+
+def install_instructions(
+    root: Path, targets: list[Target], user: bool = False
+) -> list[InstructionsResult]:
+    """Put the warmtree preference into each tool's instructions file.
+
+    Only the marked block is ever touched: outside it the file is the
+    user's, byte for byte. A missing file is created, a present block is
+    replaced when the shipped text changed, and a tool with no known
+    instructions file is skipped.
+    """
+    block = f"{INSTRUCTIONS_BEGIN}\n{INSTRUCTIONS}{INSTRUCTIONS_END}\n"
+    results = []
+    for target in targets:
+        rel = target.user_instructions_file if user else target.instructions_file
+        if rel is None:
+            results.append(InstructionsResult(target, root, "skipped"))
+            continue
+        path = root / rel
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(block, encoding="utf-8")
+            results.append(InstructionsResult(target, path, "written"))
+            continue
+        text = path.read_text(encoding="utf-8")
+        begin = text.find(INSTRUCTIONS_BEGIN)
+        end = text.find(INSTRUCTIONS_END)
+        if begin != -1 and end != -1:
+            current = text[begin : end + len(INSTRUCTIONS_END)] + "\n"
+            if current == block:
+                results.append(InstructionsResult(target, path, "current"))
+                continue
+            tail = text[end + len(INSTRUCTIONS_END) :].lstrip("\n")
+            text = text[:begin] + block + tail
+        else:
+            text = text.rstrip("\n") + "\n\n" + block
+        path.write_text(text, encoding="utf-8")
+        results.append(InstructionsResult(target, path, "updated"))
     return results
