@@ -164,7 +164,7 @@ size = 2                     # slots to keep ready
 # dir = "../.warmtree/app"   # where slots live; default is ../.warmtree/<repo name>
 lockfiles = {lockfiles_toml}  # re-warm a slot only when one of these changes
 # git_hooks = false          # run the repo's git hooks during pool operations
-# refresh_every = "24h"      # self-refresh when a command finds the pool staler; "off" disables
+# refresh_every = "24h"      # self-refresh when the pool is staler; "off" disables
 
 [warm]
 run = []                     # run inside a slot at fill and refresh, e.g. ["npm ci"]
