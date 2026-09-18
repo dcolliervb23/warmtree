@@ -538,6 +538,7 @@ def cmd_which(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     pool = _pool()
+    _maybe_auto_refresh(pool)
     slots = pool.status()
     sizes = None
     if args.du:
@@ -557,7 +558,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     print_table(slots, sizes)
     if sizes is not None:
         print(f"total {_human(sum(sizes.values()))}")
-    _maybe_auto_refresh(pool)
     return 0
 
 
@@ -641,14 +641,27 @@ def _maybe_auto_refresh(pool: Pool) -> None:
     if seconds == 0:
         return
     stamp = pool.dir / REFRESH_STAMP
+    # Checking and claiming happen under the pool lock, so two overlapping
+    # commands cannot both find the stamp overdue and double-spawn.
+    with pool.locked():
+        before: float | None
+        try:
+            before = stamp.stat().st_mtime
+            if time.time() - before < seconds:
+                return
+        except FileNotFoundError:
+            before = None  # never refreshed: overdue by definition
+        stamp.touch()
     try:
-        if time.time() - stamp.stat().st_mtime < seconds:
-            return
-    except FileNotFoundError:
-        pass  # never refreshed: overdue by definition
-    stamp.parent.mkdir(parents=True, exist_ok=True)
-    stamp.touch()
-    _spawn_background(pool.repo_root, "refresh", "--fetch")
+        _spawn_background(pool.repo_root, "refresh", "--fetch")
+    except OSError:
+        # Give the duty back rather than suppressing retries for a
+        # whole interval.
+        if before is None:
+            stamp.unlink(missing_ok=True)
+        else:
+            os.utime(stamp, (before, before))
+        raise
     note("pool refresh overdue; refreshing in the background")
 
 

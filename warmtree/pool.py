@@ -390,8 +390,12 @@ class Pool:
             rewarm = was_stale or lockfiles_changed
             slot = self._warm(slot, run=rewarm)
             results.append(Refreshed(slot, moved, rewarm))
-        self.dir.mkdir(parents=True, exist_ok=True)
-        (self.dir / REFRESH_STAMP).touch()
+        if fetch or results:
+            # A no-op pass over an empty pool must not mark it fresh, or
+            # slots created just after would sit stale for a full interval.
+            # A fetch counts even with nothing to move: currency changed.
+            self.dir.mkdir(parents=True, exist_ok=True)
+            (self.dir / REFRESH_STAMP).touch()
         return results
 
     def trim(self) -> list[Slot]:

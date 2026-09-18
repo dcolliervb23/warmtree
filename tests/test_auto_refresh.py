@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import git as run_git
 from warmtree import config as config_module
+from warmtree import git
 from warmtree.cli import main
 from warmtree.config import Config, ConfigError, interval_seconds, parse
 from warmtree.pool import REFRESH_STAMP, Pool
@@ -41,15 +43,26 @@ def test_refresh_touches_the_stamp(repo: Path):
     assert (pool.dir / REFRESH_STAMP).exists()
 
 
-def test_overdue_status_spawns_a_background_refresh(
+def test_overdue_status_spawns_a_refresh_that_really_refreshes(
     repo: Path,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     auto_refresh_on,
 ):
-    monkeypatch.chdir(repo)
+    # The completion proof is observable work, not the stamp: the spawn
+    # itself touches the stamp (the debounce), so only the slot landing on
+    # an advanced origin tip shows the detached refresh actually ran.
+    clone = tmp_path / "clone"
+    run_git("clone", "-q", str(repo), str(clone), cwd=tmp_path)
+    monkeypatch.chdir(clone)
     main(["fill"])
-    pool = Pool(repo, Config())
+    (repo / "news.txt").write_text("upstream moved\n")
+    run_git("add", "news.txt", cwd=repo)
+    run_git("commit", "-q", "-m", "upstream", cwd=repo)
+    upstream = run_git("rev-parse", "HEAD", cwd=repo)
+
+    pool = Pool(clone, Config())
     stamp = pool.dir / REFRESH_STAMP
     two_days_ago = time.time() - 2 * 86400
     stamp.touch()
@@ -58,15 +71,16 @@ def test_overdue_status_spawns_a_background_refresh(
 
     assert main(["status"]) == 0
     assert "refreshing in the background" in capsys.readouterr().err
+    assert stamp.stat().st_mtime > two_days_ago  # the debounce claim
 
-    # The spawn touched the stamp at once (the double-spawn debounce), and
-    # the detached refresh touches it again when it really finishes.
-    assert stamp.stat().st_mtime > two_days_ago
+    slot = pool.status()[0]
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        if stamp.stat().st_mtime > time.time() - 5:
+        if git.rev_parse(Path(slot.path), "HEAD") == upstream:
             break
         time.sleep(0.2)
+    else:
+        pytest.fail("the background refresh never moved the slot")
 
 
 def test_fresh_stamp_spawns_nothing(

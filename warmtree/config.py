@@ -71,7 +71,7 @@ def parse(text: str) -> Config:
     size = values.get("size", Config.size)
     if isinstance(size, int) and size < 0:
         raise ConfigError("[pool] size must be zero or more")
-    every = values.get("refresh_every")
+    every = values.get("refresh_every", Config.refresh_every)
     if isinstance(every, str):
         interval_seconds(every)  # raises ConfigError on a bad format
     return Config(**values)  # type: ignore[arg-type]
