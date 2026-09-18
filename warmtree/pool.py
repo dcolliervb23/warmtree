@@ -26,6 +26,7 @@ from warmtree.lock import FileLock
 
 STATE_FILE = "state.json"
 LOCK_FILE = "lock"
+REFRESH_STAMP = "last-refresh"  # mtime = when a refresh last finished
 STATE_VERSION = 1
 
 # ready:   parked on base, warmed, free to take
@@ -389,6 +390,8 @@ class Pool:
             rewarm = was_stale or lockfiles_changed
             slot = self._warm(slot, run=rewarm)
             results.append(Refreshed(slot, moved, rewarm))
+        self.dir.mkdir(parents=True, exist_ok=True)
+        (self.dir / REFRESH_STAMP).touch()
         return results
 
     def trim(self) -> list[Slot]:

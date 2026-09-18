@@ -30,6 +30,9 @@ class Config:
     # lingers (telemetry, spawned children) can hang a take mid-claim, and
     # per-slot setup belongs to `run` and `copy`. Set true to run them.
     git_hooks: bool = False
+    # How stale the pool may get before an ordinary command spawns a
+    # background `refresh --fetch`. "off" disables the self-refresh.
+    refresh_every: str = "24h"
 
 
 # Which keys live in which table, and the TOML type each must have.
@@ -42,6 +45,7 @@ _SCHEMA: dict[str, dict[str, type]] = {
         "dir": str,
         "lockfiles": list,
         "git_hooks": bool,
+        "refresh_every": str,
     },
     "warm": {"run": list, "copy": list, "env": bool},
 }
@@ -67,7 +71,22 @@ def parse(text: str) -> Config:
     size = values.get("size", Config.size)
     if isinstance(size, int) and size < 0:
         raise ConfigError("[pool] size must be zero or more")
+    every = values.get("refresh_every")
+    if isinstance(every, str):
+        interval_seconds(every)  # raises ConfigError on a bad format
     return Config(**values)  # type: ignore[arg-type]
+
+
+def interval_seconds(value: str) -> int:
+    """`refresh_every` as seconds. "off" or "0" disables and returns 0."""
+    if value in ("off", "0"):
+        return 0
+    match = re.fullmatch(r"(\d+)([mhd])", value)
+    if match is None:
+        raise ConfigError(
+            '[pool] refresh_every must look like 30m, 24h, or 7d, or be "off"'
+        )
+    return int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
 
 
 def _check(table: str, key: str, value: object, expected: type) -> object:
@@ -145,6 +164,7 @@ size = 2                     # slots to keep ready
 # dir = "../.warmtree/app"   # where slots live; default is ../.warmtree/<repo name>
 lockfiles = {lockfiles_toml}  # re-warm a slot only when one of these changes
 # git_hooks = false          # run the repo's git hooks during pool operations
+# refresh_every = "24h"      # self-refresh when a command finds the pool staler; "off" disables
 
 [warm]
 run = []                     # run inside a slot at fill and refresh, e.g. ["npm ci"]
