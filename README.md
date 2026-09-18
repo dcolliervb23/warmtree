@@ -229,14 +229,43 @@ integration.
 ## With worktrunk
 
 [worktrunk](https://github.com/max-sixty/worktrunk) covers the rest of the
-worktree lifecycle: hooks, port allocation, cleanup of merged branches. The two
-fit together because warmtree only touches create and release.
+worktree lifecycle: hooks, port allocation, a merge workflow, cleanup of
+merged branches. The two fit together because warmtree only touches create
+and release.
 
 - Use `warmtree take` instead of `wt switch --create` to get a warm checkout.
-- Inside the slot, worktrunk's commands work as they do in any worktree.
+- Inside the slot, worktrunk's commands work as they do in any worktree;
+  `wt list` shows pool slots like any other worktree.
 - When the branch is merged, run `warmtree release <branch>` rather than
   worktrunk's remove, so the slot goes back to the pool instead of being
   deleted.
+
+### Why both?
+
+worktrunk makes worktrees pleasant; warmtree makes them instant. When
+`wt switch --create` runs, its post-create hooks execute your install while
+you wait. warmtree moves that work off the critical path: the install
+already happened, in the background, before anyone asked. Same work,
+different moment.
+
+| | worktrunk | warmtree |
+|---|---|---|
+| Time to a usable workspace | create, then hooks run your install now | under a second; the work was pre-paid |
+| New workspace setup | post-create hooks | `warm.run` and `copy`, at fill and refresh, never at take |
+| Env files | copies ignored files | copies them and injects `WARMTREE_SLOT` for per-slot ports |
+| Port allocation | yes | only the `WARMTREE_SLOT` variable, on purpose |
+| Merge workflow | `wt merge`: squash, rebase, cleanup | none, on purpose |
+| Status | rich `wt list` | table plus `--json` for orchestrators |
+| Dependencies at end of life | deleted with the worktree | recycled: `release` keeps them warm for the next branch |
+| Staleness | tracks whatever you created from | `refresh --fetch` parks slots on origin's tip |
+| Pool health | — | `doctor --fix` |
+| Concurrent agents | — | file-locked claims, hijacked-slot detection |
+| Agent integration | shell integration | agent skill, installed by `init` |
+
+If installs are fast or worktrees are rare, worktrunk alone is fine; the
+pool's edge scales with install cost times workspace churn. On a large repo
+with parallel agents churning branches daily, every `wt switch --create`
+costs the install and every `warmtree take` costs a fraction of a second.
 
 ## How it works
 
