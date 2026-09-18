@@ -75,8 +75,12 @@ warmtree release feature/login
 `take` prints only the slot path on stdout. Everything else it says goes to
 stderr, so the `cd` idiom works.
 
-Keep slots current with a nightly `warmtree refresh --fetch` from cron or
-Task Scheduler; it fetches first, so it needs no manual pull beforehand.
+The pool keeps itself current: any `take`, `fill`, or `status` that finds
+the last refresh older than `refresh_every` (a day, by default) spawns a
+background `warmtree refresh --fetch` and returns immediately. A nightly
+cron running `warmtree refresh --fetch` still works if you want slots fresh
+before first use; set `refresh_every = "off"` (or `WARMTREE_AUTO_REFRESH=off`
+in the environment) to opt out of the self-refresh.
 
 ## Already have worktrees?
 
@@ -150,6 +154,7 @@ size = 2                       # slots to keep ready; taken slots do not count
 # dir = "../.warmtree/app"     # where slots live; default: ../.warmtree/<repo name>
 lockfiles = ["package-lock.json", "uv.lock"]  # re-warm only when one of these changes
 # git_hooks = false            # run the repo's git hooks during pool operations
+# refresh_every = "24h"        # self-refresh when a command finds the pool staler; "off" disables
 
 [warm]
 run = ["npm ci"]               # commands run inside a slot at fill and refresh time

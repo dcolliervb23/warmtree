@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,7 @@ from pathlib import Path
 from warmtree import __version__, config, git, skill
 from warmtree.config import CONFIG_NAME, ConfigError
 from warmtree.git import GitError
-from warmtree.pool import Pool, PoolError, Slot
+from warmtree.pool import REFRESH_STAMP, Pool, PoolError, Slot
 from warmtree.warm import WarmError
 
 # Lockfiles `init` looks for to pre-fill `lockfiles`. It never guesses `run`.
@@ -375,6 +376,7 @@ def cmd_fill(args: argparse.Namespace) -> int:
     if not created:
         ready = sum(1 for slot in pool.status() if slot.state == "ready")
         print(f"pool is full ({ready} ready)")
+    _maybe_auto_refresh(pool)
     return 0
 
 
@@ -409,11 +411,12 @@ def cmd_take(args: argparse.Namespace) -> int:
         print(slot.path)
 
     if args.refill_background:
-        _spawn_background_fill(pool.repo_root)
+        _spawn_background(pool.repo_root, "fill")
         note("refilling in the background")
     elif not args.no_refill:
         for created in pool.fill():
             note(f"refilled {created.name}")
+    _maybe_auto_refresh(pool)
     return 0
 
 
@@ -534,7 +537,9 @@ def cmd_which(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    slots = _pool().status()
+    pool = _pool()
+    _maybe_auto_refresh(pool)
+    slots = pool.status()
     sizes = None
     if args.du:
         sizes = {slot.name: _tree_size(Path(slot.path)) for slot in slots}
@@ -624,14 +629,50 @@ def _human(size: int) -> str:
     return f"{value:.1f} {unit}"
 
 
+def _maybe_auto_refresh(pool: Pool) -> None:
+    """Spawn a background `refresh --fetch` when the pool is overdue.
+
+    The stamp is touched at spawn time so overlapping commands cannot spawn
+    twice; the refresh touches it again with the real time when it finishes.
+    """
+    if os.environ.get("WARMTREE_AUTO_REFRESH") == "off":
+        return  # blanket override, for CI and scripts
+    seconds = config.interval_seconds(pool.config.refresh_every)
+    if seconds == 0:
+        return
+    stamp = pool.dir / REFRESH_STAMP
+    # Checking and claiming happen under the pool lock, so two overlapping
+    # commands cannot both find the stamp overdue and double-spawn.
+    with pool.locked():
+        before: float | None
+        try:
+            before = stamp.stat().st_mtime
+            if time.time() - before < seconds:
+                return
+        except FileNotFoundError:
+            before = None  # never refreshed: overdue by definition
+        stamp.touch()
+    try:
+        _spawn_background(pool.repo_root, "refresh", "--fetch")
+    except OSError:
+        # Give the duty back rather than suppressing retries for a
+        # whole interval.
+        if before is None:
+            stamp.unlink(missing_ok=True)
+        else:
+            os.utime(stamp, (before, before))
+        raise
+    note("pool refresh overdue; refreshing in the background")
+
+
 def _pool() -> Pool:
     root = git.repo_root(Path.cwd())
     return Pool(root, config.load(root), log=note)
 
 
-def _spawn_background_fill(repo_root: Path) -> None:
-    """Start `warmtree fill` detached from this process and terminal."""
-    command = [sys.executable, "-m", "warmtree", "fill"]
+def _spawn_background(repo_root: Path, *args: str) -> None:
+    """Start a warmtree command detached from this process and terminal."""
+    command = [sys.executable, "-m", "warmtree", *args]
     options: dict = {
         "cwd": repo_root,
         "stdin": subprocess.DEVNULL,
