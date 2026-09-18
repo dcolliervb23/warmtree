@@ -58,9 +58,8 @@ def test_skill_user_cli_works_outside_a_repo(
 def test_skill_user_kept_note_names_the_user_flags(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    home = tmp_path / "home"
-    (home / ".claude").mkdir(parents=True)
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    home = Path.home()
+    (home / ".claude").mkdir()
     monkeypatch.chdir(tmp_path)
 
     main(["skill", "--user"])
@@ -75,9 +74,6 @@ def test_skill_user_kept_note_names_the_user_flags(
 def test_skill_user_cli_without_agent_folders_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.chdir(tmp_path)
 
     assert main(["skill", "--user"]) == 1
@@ -108,9 +104,7 @@ def test_init_refuses_no_skill_with_user_skill(repo: Path, monkeypatch, capsys):
 def test_skill_user_cli_with_explicit_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    home = Path.home()
     monkeypatch.chdir(tmp_path)
 
     assert main(["skill", "--user", "--tool", "codex"]) == 0

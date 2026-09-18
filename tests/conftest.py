@@ -26,3 +26,17 @@ def repo(tmp_path: Path) -> Path:
     git("add", "README.md", cwd=path)
     git("commit", "-q", "-m", "initial", cwd=path)
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """No test ever reads or writes the real home directory.
+
+    Commands like `init` and `instructions` write user-level files; without
+    this, a test run would edit the developer's own agent configuration.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("HOME", str(home))
+    return home
