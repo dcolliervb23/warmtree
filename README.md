@@ -263,7 +263,7 @@ different moment.
 | Dependencies at end of life | deleted with the worktree | recycled: `release` keeps them warm for the next branch |
 | Staleness | tracks whatever you created from | `refresh --fetch` parks slots on origin's tip |
 | Pool health | — | `doctor --fix` |
-| Concurrent agents | — | file-locked claims, hijacked-slot detection |
+| Concurrent agents | — | file-locked claims, slot leases, hijacked-slot detection |
 | Agent integration | shell integration | agent skill, installed by `init` |
 
 If installs are fast or worktrees are rare, worktrunk alone is fine; the
