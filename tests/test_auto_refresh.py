@@ -1,0 +1,99 @@
+"""Ordinary commands keep the pool current by spawning overdue refreshes."""
+
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from warmtree import config as config_module
+from warmtree.cli import main
+from warmtree.config import Config, ConfigError, interval_seconds, parse
+from warmtree.pool import REFRESH_STAMP, Pool
+
+
+@pytest.fixture
+def auto_refresh_on(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("WARMTREE_AUTO_REFRESH")
+
+
+def test_interval_seconds_understands_the_formats():
+    assert interval_seconds("30m") == 1800
+    assert interval_seconds("24h") == 86400
+    assert interval_seconds("7d") == 604800
+    assert interval_seconds("off") == 0
+    assert interval_seconds("0") == 0
+
+
+def test_bad_intervals_are_config_errors():
+    with pytest.raises(ConfigError, match="refresh_every"):
+        interval_seconds("soon")
+    with pytest.raises(ConfigError, match="refresh_every"):
+        parse('[pool]\nrefresh_every = "1 day"\n')
+    assert parse('[pool]\nrefresh_every = "12h"\n').refresh_every == "12h"
+    assert parse("").refresh_every == "24h"
+
+
+def test_refresh_touches_the_stamp(repo: Path):
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
+    pool.refresh()
+    assert (pool.dir / REFRESH_STAMP).exists()
+
+
+def test_overdue_status_spawns_a_background_refresh(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    auto_refresh_on,
+):
+    monkeypatch.chdir(repo)
+    main(["fill"])
+    pool = Pool(repo, Config())
+    stamp = pool.dir / REFRESH_STAMP
+    two_days_ago = time.time() - 2 * 86400
+    stamp.touch()
+    os.utime(stamp, (two_days_ago, two_days_ago))
+    capsys.readouterr()
+
+    assert main(["status"]) == 0
+    assert "refreshing in the background" in capsys.readouterr().err
+
+    # The spawn touched the stamp at once (the double-spawn debounce), and
+    # the detached refresh touches it again when it really finishes.
+    assert stamp.stat().st_mtime > two_days_ago
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if stamp.stat().st_mtime > time.time() - 5:
+            break
+        time.sleep(0.2)
+
+
+def test_fresh_stamp_spawns_nothing(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    auto_refresh_on,
+):
+    monkeypatch.chdir(repo)
+    main(["fill"])
+    Pool(repo, Config()).refresh()  # fresh stamp
+    capsys.readouterr()
+
+    assert main(["status"]) == 0
+    assert "refreshing" not in capsys.readouterr().err
+
+
+def test_refresh_every_off_disables_the_self_refresh(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    auto_refresh_on,
+):
+    (repo / config_module.CONFIG_NAME).write_text('[pool]\nrefresh_every = "off"\n')
+    monkeypatch.chdir(repo)
+    main(["fill"])
+    capsys.readouterr()
+
+    assert main(["status"]) == 0
+    assert "refreshing" not in capsys.readouterr().err

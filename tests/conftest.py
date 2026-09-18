@@ -40,3 +40,12 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.setenv("HOME", str(home))
     return home
+
+
+@pytest.fixture(autouse=True)
+def no_auto_refresh(monkeypatch: pytest.MonkeyPatch):
+    """CLI commands must not spawn background refreshes under test.
+
+    The dedicated auto-refresh tests delete this variable to opt back in.
+    """
+    monkeypatch.setenv("WARMTREE_AUTO_REFRESH", "off")
