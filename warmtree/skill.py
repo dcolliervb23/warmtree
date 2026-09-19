@@ -23,7 +23,8 @@ SHIPPED_SKILL_HASHES = (
     "498d5df8ad3d4e408bafa06598a5114a8711e1a5a0b574309e6da15292c971b6",  # v0.1.1
     "d9570ba9f2a72ff34534e2610f40c2a477a09dc276bcf8d3cad8be6a0e574dfc",  # v0.2.0
     "21c280055a08d49df3817fd89ba1e4836cd956d5980ed582c3e0adeb244583cc",  # v0.4.0
-    "8bebc1e0a4a8b80a548cd0377c3b5bcd82cae74ddc82990c56c3cbd029bfad59",
+    "8bebc1e0a4a8b80a548cd0377c3b5bcd82cae74ddc82990c56c3cbd029bfad59",  # v0.5.0
+    "4bf2b7dbe37cfb6a8cee7f9a9b4964118ba75e29996d0dd5a21e06c155663ff4",  # unreleased
 )
 
 
