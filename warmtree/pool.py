@@ -297,6 +297,24 @@ class Pool:
             branch_deleted = False
             if not keep_branch:
                 branch_deleted = git.branch_delete(self.repo_root, branch)
+            # An adopted slot graduates into the pool directory now, not at
+            # adoption: with the branch done, the tree reset, and the lease
+            # surrendered, nothing legitimate is watching the old path.
+            home = self.dir / slot.name
+            if path.resolve() != home.resolve():
+                try:
+                    # git worktree move into an existing directory NESTS the
+                    # tree inside it and still exits zero; guard explicitly.
+                    if home.exists():
+                        raise git.GitError(f"{home} already exists")
+                    self.dir.mkdir(parents=True, exist_ok=True)
+                    git.worktree_move(self.repo_root, path, home)
+                    slot.path = str(home)
+                    self.log(f"{slot.name} moved into the pool at {home}")
+                except git.GitError as exc:
+                    # Still a working slot at its old address; doctor and
+                    # status show where it lives.
+                    self.log(f"{slot.name} stays at {path}: the move failed ({exc})")
             slot.state = "ready"
             slot.branch = None
             slot.lease_pid = None
@@ -305,13 +323,14 @@ class Pool:
             return slot, branch_deleted
 
     def adopt(self, path: Path) -> Slot:
-        """Move an existing worktree into the pool as a taken slot.
+        """Register an existing worktree as a taken slot, in place.
 
-        The worktree keeps its branch and everything in its tree, installed
-        dependencies included, so a later `release` recycles it as a warm
-        ready slot instead of the user deleting it. The tree may be dirty;
-        adoption moves it, nothing more. Adoption assumes the tree is warm:
-        its lockfile hashes are recorded as the warm state.
+        Nothing on disk changes: the folder keeps its path and name, so
+        editors, shells, and running processes pointed at it keep working.
+        The pool collects the folder later, at release, when the branch is
+        done and nothing legitimate is still inside. The tree may be dirty;
+        adoption records it, nothing more. Adoption assumes the tree is
+        warm: its lockfile hashes are recorded as the warm state.
         """
         with self.locked():
             slots = self.load_state()
@@ -321,7 +340,7 @@ class Pool:
             for slot in slots:
                 if Path(slot.path).resolve() == source:
                     raise PoolError(f"{source} is already {slot.name}")
-            if source not in git.worktree_list(self.repo_root):
+            if not git.owns_worktree(self.repo_root, source):
                 raise PoolError(f"{source} is not a worktree of this repository")
             branch = git.head_branch(source)
             if branch is None:
@@ -329,17 +348,14 @@ class Pool:
                     f"{source} has a detached HEAD; check out a branch first"
                 )
             name = _next_name(slots)
-            dest = self.dir / name
-            self.dir.mkdir(parents=True, exist_ok=True)
-            git.worktree_move(self.repo_root, source, dest)
             slot = Slot(
                 name=name,
-                path=str(dest),
+                path=str(source),
                 state="taken",
                 branch=branch,
                 created=_now(),
                 warmed=_now(),
-                lockfiles=warm.hash_lockfiles(dest, self.config.lockfiles),
+                lockfiles=warm.hash_lockfiles(source, self.config.lockfiles),
                 lease_pid=os.getppid(),
                 lease_since=_now(),
             )
