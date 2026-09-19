@@ -134,3 +134,23 @@ def test_adopt_cli_prints_only_the_path_on_stdout(
     assert path.is_dir()
     assert git.head_branch(path) == "feature"
     assert "adopted" in err
+
+
+def test_ungraduated_slots_are_never_auto_deleted(repo: Path):
+    worktree = hand_made_worktree(repo, "feature")
+    pool = Pool(repo, Config(size=0))
+    slot = pool.adopt(worktree)
+    squatter = pool.dir / slot.name
+    squatter.mkdir(parents=True)
+    (squatter / "occupied.txt").write_text("here first")
+    pool.release("feature")  # graduation fails; ready at the old address
+
+    assert pool.trim() == []  # size 0 with one waiting slot: surplus exists
+    assert worktree.exists()
+
+    with pytest.raises(PoolError, match="outside the pool directory"):
+        pool.remove(names=[slot.name])
+    assert worktree.exists()
+
+    removed = pool.remove(names=[slot.name], force=True)
+    assert [s.name for s in removed] == [slot.name]

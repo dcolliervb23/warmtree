@@ -414,17 +414,27 @@ class Pool:
             (self.dir / REFRESH_STAMP).touch()
         return results
 
+    def _at_home(self, slot: Slot) -> bool:
+        """Whether the slot's folder lives in the pool directory."""
+        return Path(slot.path).resolve() == (self.dir / slot.name).resolve()
+
     def trim(self) -> list[Slot]:
         """Remove waiting slots beyond `size`, highest number first.
 
-        Taken slots are never touched, and slots another process is warming
-        are left alone. Returns the slots removed.
+        Taken slots are never touched, slots another process is warming are
+        left alone, and a slot still living outside the pool directory (an
+        adoption whose graduation failed) is never auto-deleted: its folder
+        is in the user's own space. Returns the slots removed.
         """
         with self.locked():
             slots = self.load_state()
             surplus = _waiting(slots) - self.config.size
             candidates = sorted(
-                (slot for slot in slots if slot.state in REFRESHABLE),
+                (
+                    slot
+                    for slot in slots
+                    if slot.state in REFRESHABLE and self._at_home(slot)
+                ),
                 key=lambda slot: slot.number,
                 reverse=True,
             )
@@ -456,6 +466,12 @@ class Pool:
             if taken and not force:
                 raise PoolError(
                     f"{', '.join(taken)} taken; release first or use --force"
+                )
+            away = [slot.name for slot in targets if not self._at_home(slot)]
+            if away and not force:
+                raise PoolError(
+                    f"{', '.join(away)} lives outside the pool directory; "
+                    "deleting it would remove your own folder, use --force"
                 )
             for slot in targets:
                 git.worktree_remove(self.repo_root, Path(slot.path))
