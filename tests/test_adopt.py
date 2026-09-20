@@ -18,7 +18,7 @@ def hand_made_worktree(repo: Path, branch: str) -> Path:
     return path
 
 
-def test_adopt_moves_worktree_into_pool_as_taken(repo: Path):
+def test_adopt_registers_in_place_and_changes_nothing_on_disk(repo: Path):
     (repo / ".gitignore").write_text("node_modules/\n")
     run_git("add", ".gitignore", cwd=repo)
     run_git("commit", "-q", "-m", "ignore dependencies", cwd=repo)
@@ -32,20 +32,47 @@ def test_adopt_moves_worktree_into_pool_as_taken(repo: Path):
 
     assert slot.state == "taken"
     assert slot.branch == "feature"
-    assert Path(slot.path) == pool.dir / slot.name
-    assert not worktree.exists()
-    assert (Path(slot.path) / "node_modules" / "dep.js").exists()
-    assert Path(slot.path).resolve() in git.worktree_list(repo)
+    # Nothing moved: editors and shells on this path keep working.
+    assert Path(slot.path) == worktree.resolve()
+    assert worktree.exists()
+    assert (worktree / "node_modules" / "dep.js").exists()
 
 
-def test_adopt_then_release_recycles_the_slot_as_ready(repo: Path):
+def test_release_graduates_the_adopted_folder_into_the_pool(repo: Path):
+    (repo / ".gitignore").write_text("node_modules/\n")
+    run_git("add", ".gitignore", cwd=repo)
+    run_git("commit", "-q", "-m", "ignore dependencies", cwd=repo)
     worktree = hand_made_worktree(repo, "feature")
+    (worktree / "node_modules").mkdir()
+    (worktree / "node_modules" / "dep.js").write_text("cached\n")
     pool = Pool(repo, Config(size=0))
-    pool.adopt(worktree)
+    slot = pool.adopt(worktree)
 
     released, _ = pool.release("feature")
     assert released.state == "ready"
+    assert Path(released.path) == pool.dir / slot.name
+    assert not worktree.exists()  # the old address is gone, at a safe moment
+    assert (Path(released.path) / "node_modules" / "dep.js").exists()
     assert git.head_branch(Path(released.path)) is None
+
+
+def test_release_keeps_the_slot_working_when_the_move_fails(repo: Path):
+    worktree = hand_made_worktree(repo, "feature")
+    notes: list[str] = []
+    pool = Pool(repo, Config(size=0), log=notes.append)
+    slot = pool.adopt(worktree)
+    squatter = pool.dir / slot.name  # a non-empty stranger blocks the move
+    squatter.mkdir(parents=True)
+    (squatter / "occupied.txt").write_text("here first")
+
+    released, _ = pool.release("feature")
+    assert released.state == "ready"
+    assert Path(released.path) == worktree.resolve()
+    assert any("stays at" in message for message in notes)
+
+    taken, cold = pool.take("again")
+    assert cold is False
+    assert Path(taken.path) == worktree.resolve()
 
 
 def test_adopt_keeps_a_dirty_tree_intact(repo: Path):
@@ -107,3 +134,23 @@ def test_adopt_cli_prints_only_the_path_on_stdout(
     assert path.is_dir()
     assert git.head_branch(path) == "feature"
     assert "adopted" in err
+
+
+def test_ungraduated_slots_are_never_auto_deleted(repo: Path):
+    worktree = hand_made_worktree(repo, "feature")
+    pool = Pool(repo, Config(size=0))
+    slot = pool.adopt(worktree)
+    squatter = pool.dir / slot.name
+    squatter.mkdir(parents=True)
+    (squatter / "occupied.txt").write_text("here first")
+    pool.release("feature")  # graduation fails; ready at the old address
+
+    assert pool.trim() == []  # size 0 with one waiting slot: surplus exists
+    assert worktree.exists()
+
+    with pytest.raises(PoolError, match="outside the pool directory"):
+        pool.remove(names=[slot.name])
+    assert worktree.exists()
+
+    removed = pool.remove(names=[slot.name], force=True)
+    assert [s.name for s in removed] == [slot.name]

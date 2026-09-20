@@ -94,12 +94,12 @@ shows yours. For each directory you want to keep working in, adopt it:
 warmtree adopt ../myrepo-feature-x
 ```
 
-The directory moves into the pool as a taken slot — branch, uncommitted
-changes, and installed dependencies included. Editors and shells still open
-on the old path need repointing; `adopt` prints the new path on stdout, so
-`cd "$(warmtree adopt ../myrepo-feature-x)"` follows the move. When the
-branch is done, `warmtree release` recycles the slot, dependencies intact,
-instead of the tree being deleted.
+Nothing on disk changes: the worktree is registered as a taken slot right
+where it is, so open editors, running servers, and shell sessions keep
+working. When the branch is done, `warmtree release` resets the tree and
+moves the folder into the pool — the one moment nothing legitimate is still
+inside it — and the slot, dependencies intact, joins the ready pool instead
+of being deleted.
 
 Branches without a checkout need no onboarding: they are just refs, and
 `warmtree take <branch>` is how they get a workspace from now on. A worktree
@@ -121,7 +121,7 @@ pool's fresh slots do the work.
 | `warmtree take ... --refill-background` | Refill in a detached process and return immediately. |
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. Refuses a slot leased to another still-running session (the one that ran `take` or `adopt`); `--force` overrides. `--json` prints `slot`, `branch`, `branch_deleted`. |
 | `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. Does not pin the slot: do not release a branch while a command still runs in it. |
-| `warmtree adopt <path>` | Move an existing worktree into the pool as a taken slot. Its branch, uncommitted changes, and installed dependencies come with it; a later `release` recycles them. Prints the new path. |
+| `warmtree adopt <path>` | Register an existing worktree as a taken slot, in place; nothing on disk changes. At `release` the folder moves into the pool and its dependencies are recycled. |
 | `warmtree refresh [--fetch]` | Move every waiting slot to the current base commit and re-copy files. `--fetch` fetches first and parks slots on `origin/<base>`, so they track the remote even when your local base branch is behind; your own checkout is never touched. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |

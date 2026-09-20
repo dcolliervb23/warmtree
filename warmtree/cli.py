@@ -447,7 +447,7 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     pool = _pool()
     slot = pool.adopt(Path(args.path))
     note(f"adopted {args.path} as {slot.name} (branch {slot.branch})")
-    note("editors and shells still open on the old path need repointing")
+    note("nothing moved; the folder joins the pool when the branch is released")
     print(slot.path)
     return 0
 
