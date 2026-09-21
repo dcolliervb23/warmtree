@@ -6,9 +6,6 @@ Append here instead of expanding DESIGN.md.
 - **Stream warm output.** `run` output is captured and shown only on failure
   so `take` keeps stdout clean. A `--verbose` flag on `fill` and `refresh`
   could stream it to stderr for a first-time `npm ci` that takes minutes.
-- **`refresh --fetch`.** `refresh` moves slots to the local base tip. It could
-  run `git fetch` first, or accept `base = "origin/main"`, which already works
-  because the base is resolved with `rev-parse`.
 - **A real docs site.** The README is the documentation for now, on
   purpose. If warmtree grows an audience, split command reference and
   workflows into docs/ and keep the README as the pitch plus quick start.
@@ -30,17 +27,9 @@ Append here instead of expanding DESIGN.md.
   a full node_modules on disk. Needs `max_size`, and shrinking back toward
   the configured size edges into daemon territory. Cold fallback plus the
   skill telling agents to grow before fanning out covers most of it today.
-- **`adopt <path>`: fold an existing worktree into the pool.** Registers a
-  hand-made worktree as a taken slot (moving it into the pool dir with
-  `git worktree move`, opt-in and one at a time), so a later `release`
-  recycles its warm dependencies instead of the user deleting them. The
-  onboarding story for repos mid-development. PR-aware cleanup of non-pool
-  worktrees stays out: forge APIs, and it is worktrunk's job.
 - **`release --merged`: sweep taken slots whose branch is merged.** The same
   local `git branch -d` test release already uses, applied across the pool.
   Cleanup confined to worktrees warmtree owns, no forge APIs.
-- **README FAQ: onboarding an existing repo.** The pool is additive; old
-  worktrees age out naturally. Say so explicitly for mid-development users.
 - **Reflink spike results (2026-09-13, spike/reflink branch).** Measured on
   real btrfs, xfs, and apfs via CI loop mounts: cloning a 529 MB, 45,000-file
   synthetic node_modules took 2.4s / 4.0s / 10.6s — only 1-3x faster than a
@@ -67,9 +56,3 @@ Append here instead of expanding DESIGN.md.
   (config key vs `git clean -ndX`), Windows story (ReFS block cloning is
   rare on dev machines), and whether release-deletes-clone should retire
   reset-on-release entirely once the template path exists.
-- **Slot leases.** Nothing stops `release` while a process is working
-  inside a slot: a shell after `cd $(warmtree take x)`, an editor, or
-  `warmtree exec`. The dirty-tree refusal is the only guard. A lease field
-  in state (holder pid + expiry, set by take/exec, checked by release)
-  would close it for every entry point at once; per-command fixes would
-  not. From the exec review, 2026-09-12.
