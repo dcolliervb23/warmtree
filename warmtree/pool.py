@@ -22,6 +22,7 @@ from pathlib import Path
 
 from warmtree import git, warm
 from warmtree.config import Config, pool_dir
+from warmtree.config import interval_seconds as config_interval
 from warmtree.lock import FileLock
 
 STATE_FILE = "state.json"
@@ -57,6 +58,9 @@ class Slot:
     # defaults so state files from older versions load unchanged.
     lease_pid: int | None = None
     lease_since: str | None = None
+    # When the slot last went back to ready. The idle clock for shrinking;
+    # a fill-created slot that was never taken idles from `created`.
+    released: str | None = None
 
     @property
     def number(self) -> int:
@@ -202,9 +206,17 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
+            # Most recently used first: concentrating takes in hot slots
+            # lets the surplus go genuinely idle, which is what allows
+            # shrinking to reclaim it. Round-robin would reset every
+            # slot's idle clock in turn and nothing would ever decay.
             ready = sorted(
                 (slot for slot in slots if slot.state == "ready"),
-                key=lambda slot: (slot.warmed or slot.created, slot.name),
+                key=lambda slot: (
+                    slot.released or slot.warmed or slot.created,
+                    slot.name,
+                ),
+                reverse=True,
             )
             # A ready slot must be parked detached. One with a branch checked
             # out was hijacked behind warmtree's back (a manual checkout in
@@ -319,6 +331,7 @@ class Pool:
             slot.branch = None
             slot.lease_pid = None
             slot.lease_since = None
+            slot.released = _now()
             self.save_state(slots)
             return slot, branch_deleted
 
@@ -406,6 +419,7 @@ class Pool:
             rewarm = was_stale or lockfiles_changed
             slot = self._warm(slot, run=rewarm)
             results.append(Refreshed(slot, moved, rewarm))
+        self._shrink()
         if fetch or results:
             # A no-op pass over an empty pool must not mark it fresh, or
             # slots created just after would sit stale for a full interval.
@@ -413,6 +427,50 @@ class Pool:
             self.dir.mkdir(parents=True, exist_ok=True)
             (self.dir / REFRESH_STAMP).touch()
         return results
+
+    def _shrink(self) -> None:
+        """Trim surplus ready slots that idled past `shrink_after`.
+
+        A burst grows the pool; this is how it comes back down. `size` is
+        the floor — the pool never trims below its configured ready count —
+        and the clock is per slot: released (or created, for a slot never
+        taken) older than the window. Oldest idle goes first. Slots living
+        outside the pool directory are the user's folders and are left
+        alone, as everywhere else.
+        """
+        window = config_interval(self.config.shrink_after)
+        if window == 0:
+            return
+        cutoff = datetime.now(UTC).timestamp() - window
+        with self.locked():
+            slots = self.load_state()
+            ready = [
+                slot
+                for slot in slots
+                if slot.state == "ready" and self._at_home(slot)
+            ]
+            surplus = len([s for s in slots if s.state != "taken"]) - self.config.size
+            if surplus <= 0:
+                return
+            idle_first = sorted(
+                ready, key=lambda s: s.released or s.warmed or s.created
+            )
+            trimmed = 0
+            for slot in idle_first:
+                if trimmed >= surplus:
+                    break
+                stamp = slot.released or slot.warmed or slot.created
+                if datetime.fromisoformat(stamp).timestamp() > cutoff:
+                    break  # everything after this is younger still
+                git.worktree_remove(self.repo_root, Path(slot.path))
+                slots.remove(slot)
+                trimmed += 1
+                self.log(
+                    f"trimmed {slot.name}: unused since {stamp}, "
+                    f"pool heading back to {self.config.size} ready"
+                )
+            if trimmed:
+                self.save_state(slots)
 
     def _at_home(self, slot: Slot) -> bool:
         """Whether the slot's folder lives in the pool directory."""
