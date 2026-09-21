@@ -74,7 +74,7 @@ def test_trim_never_touches_taken_slots(repo: Path):
 
     removed = Pool(repo, Config(size=0)).trim()
 
-    assert [slot.name for slot in removed] == ["slot-2"]
+    assert [slot.name for slot in removed] == ["slot-1"]
     [taken] = Pool(repo, Config(size=0)).status()
     assert taken.state == "taken"
 
@@ -164,7 +164,7 @@ def test_which_inside_a_slot_names_it(
 
     assert main(["which"]) == 0
 
-    assert capsys.readouterr().out.strip() == "slot-1 taken feature/a"
+    assert capsys.readouterr().out.strip() == "slot-2 taken feature/a"
 
 
 def test_which_in_the_main_worktree_fails(

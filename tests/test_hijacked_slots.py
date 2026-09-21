@@ -95,14 +95,14 @@ def test_take_records_hijacks_even_when_its_own_checkout_fails(pool: Pool):
 
 def test_take_skips_a_hijacked_slot_and_records_it(pool: Pool):
     slots = pool.status()
-    oldest = slots[0]
-    hijack(oldest.path, "stray")
+    hottest = slots[-1]  # take claims the most recently warmed slot first
+    hijack(hottest.path, "stray")
 
     slot, cold = pool.take("feature")
-    assert slot.name != oldest.name
+    assert slot.name != hottest.name
     assert cold is False
     assert git.head_branch(Path(slot.path)) == "feature"
-    assert pool.taken("stray").name == oldest.name
+    assert pool.taken("stray").name == hottest.name
 
 
 def test_take_falls_back_cold_when_every_ready_slot_is_hijacked(repo: Path):
