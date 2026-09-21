@@ -445,9 +445,7 @@ class Pool:
         with self.locked():
             slots = self.load_state()
             ready = [
-                slot
-                for slot in slots
-                if slot.state == "ready" and self._at_home(slot)
+                slot for slot in slots if slot.state == "ready" and self._at_home(slot)
             ]
             surplus = len([s for s in slots if s.state != "taken"]) - self.config.size
             if surplus <= 0:
