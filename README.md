@@ -77,7 +77,11 @@ stderr, so the `cd` idiom works.
 
 The pool keeps itself current: any `take`, `fill`, or `status` that finds
 the last refresh older than `refresh_every` (a day, by default) spawns a
-background `warmtree refresh --fetch` and returns immediately. A nightly
+background `warmtree refresh --fetch` and returns immediately. The same
+refresh pass also trims the pool back down: a burst can grow it well past
+`size`, and surplus ready slots that then sit unused for `shrink_after`
+(fourteen days, by default) are removed, oldest idle first, never below
+`size`. Set either to `"off"` to opt out. A nightly
 cron running `warmtree refresh --fetch` still works if you want slots fresh
 before first use; set `refresh_every = "off"` (or `WARMTREE_AUTO_REFRESH=off`
 in the environment) to opt out of the self-refresh.
@@ -155,6 +159,7 @@ size = 2                       # slots to keep ready; taken slots do not count
 lockfiles = ["package-lock.json", "uv.lock"]  # re-warm only when one of these changes
 # git_hooks = false            # run the repo's git hooks during pool operations
 # refresh_every = "24h"        # self-refresh when a command finds the pool staler; "off" disables
+# shrink_after = "14d"         # trim surplus ready slots unused this long back to size; "off" keeps them
 
 [warm]
 run = ["npm ci"]               # commands run inside a slot at fill and refresh time
