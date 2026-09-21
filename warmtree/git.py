@@ -191,6 +191,19 @@ def fetch(repo: Path) -> None:
         run(["fetch", "--quiet", "origin"], cwd=repo)
 
 
+def checkout_tracking_branch(path: Path, branch: str) -> None:
+    """Create `branch` from origin/`branch` and track it, like checkout's DWIM."""
+    run(["checkout", "--quiet", "--track", f"origin/{branch}"], cwd=path)
+
+
+def worktree_add_tracking(repo: Path, path: Path, branch: str) -> None:
+    """Cold-create a worktree on a new `branch` tracking origin/`branch`."""
+    run(
+        ["worktree", "add", "--track", "-b", branch, str(path), f"origin/{branch}"],
+        cwd=repo,
+    )
+
+
 def checkout_branch(path: Path, branch: str) -> None:
     run(["checkout", "--quiet", branch], cwd=path)
 
