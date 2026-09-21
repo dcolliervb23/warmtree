@@ -8,7 +8,8 @@ description: Get an isolated git worktree for a branch in under a second from th
 This repo keeps a pool of pre-warmed git worktrees called slots: parked on
 the base branch with a detached HEAD, dependencies installed and env files
 copied when `.warmtree.toml`'s `[warm]` section says how. With an empty
-`run`, slots are bare checkouts; `warmtree fill` says so.
+`run`, slots are bare checkouts; `warmtree fill` says so when it
+recognizes a lockfile in the repo.
 `warmtree take` hands you one instantly.
 
 Where `.warmtree.toml` exists, warmtree is the default, not a fallback:

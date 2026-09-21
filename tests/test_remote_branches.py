@@ -22,7 +22,7 @@ def cloned(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
 def push_branch(origin: Path, branch: str) -> str:
     """A branch with real work that exists only on the remote."""
     run_git("checkout", "-q", "-b", branch, cwd=origin)
-    (origin / "pr-work.txt").write_text("two commits of someone's PR\n")
+    (origin / "pr-work.txt").write_text("someone's open PR work\n")
     run_git("add", "pr-work.txt", cwd=origin)
     run_git("commit", "-q", "-m", "pr work", cwd=origin)
     tip = run_git("rev-parse", "HEAD", cwd=origin)
