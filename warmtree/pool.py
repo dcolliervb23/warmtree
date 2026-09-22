@@ -192,7 +192,9 @@ class Pool:
     ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
-        The oldest ready slot gets `branch` checked out. A new branch starts
+        The most recently used ready slot gets `branch` checked out — hot
+        allocation keeps cold surplus idle so shrinking can reclaim it. A
+        new branch starts
         at `from_ref` when given, and otherwise where the slot is parked:
         refresh positioned it on the freshest known base, and re-resolving
         the local base here would drag the slot back to a stale commit. Only
@@ -395,6 +397,11 @@ class Pool:
             if git.ref_exists(self.repo_root, remote_ref):
                 base_ref = remote_ref
 
+        # Shrink first: a surplus slot due for trimming must not have its
+        # lockfiles re-warmed moments before deletion, and a warm failure
+        # below must not cancel reclamation. Slots recovered from stale in
+        # this pass get their shrink consideration on the next one.
+        self._shrink()
         with self.locked():
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
@@ -419,7 +426,6 @@ class Pool:
             rewarm = was_stale or lockfiles_changed
             slot = self._warm(slot, run=rewarm)
             results.append(Refreshed(slot, moved, rewarm))
-        self._shrink()
         if fetch or results:
             # A no-op pass over an empty pool must not mark it fresh, or
             # slots created just after would sit stale for a full interval.
@@ -465,13 +471,14 @@ class Pool:
                     break  # everything after this is younger still
                 git.worktree_remove(self.repo_root, Path(slot.path))
                 slots.remove(slot)
+                # Persist immediately: a failure removing the next slot
+                # must not leave state listing this already-deleted one.
+                self.save_state(slots)
                 trimmed += 1
                 self.log(
                     f"trimmed {slot.name}: unused since {stamp}, "
                     f"pool heading back to {self.config.size} ready"
                 )
-            if trimmed:
-                self.save_state(slots)
 
     def _at_home(self, slot: Slot) -> bool:
         """Whether the slot's folder lives in the pool directory."""

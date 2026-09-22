@@ -77,8 +77,10 @@ def test_taken_slots_never_count_or_decay(repo: Path):
 
 
 def test_shrink_after_is_validated():
+    from warmtree.config import ConfigError
+
     assert parse('[pool]\nshrink_after = "30m"\n').shrink_after == "30m"
-    with pytest.raises(Exception, match="refresh_every|shrink_after|30m|format|off"):
+    with pytest.raises(ConfigError, match="shrink_after"):
         parse('[pool]\nshrink_after = "fortnight"\n')
 
 
