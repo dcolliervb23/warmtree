@@ -189,7 +189,18 @@ def build_parser() -> argparse.ArgumentParser:
     remove.set_defaults(func=cmd_remove)
 
     refresh = commands.add_parser(
-        "refresh", help="move waiting slots to base and re-warm if lockfiles changed"
+        "refresh",
+        help="move waiting slots to base, re-warm if lockfiles changed, "
+        "and trim long-idle surplus",
+        description="Bring waiting slots to the current base commit, "
+        "re-copy files, and re-run the warm commands where a lockfile "
+        "hash changed. Also trims surplus ready slots that have sat "
+        "unused longer than [pool] shrink_after (14d by default) back "
+        "down to size. Runs automatically in the background per "
+        '[pool] refresh_every; both accept 30m/24h/7d forms or "off".',
+        epilog="example: a pool that tracks origin nightly, keeps 3 ready, "
+        "and forgets burst slots after a week -- .warmtree.toml: "
+        '[pool] size = 3, refresh_every = "24h", shrink_after = "7d"',
     )
     refresh.add_argument(
         "--fetch",
