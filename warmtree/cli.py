@@ -35,6 +35,7 @@ INSTALL_HINTS = {
     "requirements.txt": "pip install -r requirements.txt",
     "Cargo.lock": "cargo fetch",
     "go.sum": "go mod download",
+    "packages.lock.json": "dotnet restore --locked-mode",
     "Gemfile.lock": "bundle install",
     "composer.lock": "composer install",
 }
