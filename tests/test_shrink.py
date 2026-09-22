@@ -80,3 +80,32 @@ def test_shrink_after_is_validated():
     assert parse('[pool]\nshrink_after = "30m"\n').shrink_after == "30m"
     with pytest.raises(Exception, match="refresh_every|shrink_after|30m|format|off"):
         parse('[pool]\nshrink_after = "fortnight"\n')
+
+
+def test_stale_slots_earn_no_credit_toward_the_floor(repo: Path):
+    # size 2 with three ready and one stale: the stale entry must not
+    # inflate the surplus, or trimming leaves fewer ready than size.
+    # _shrink is called directly; refresh would heal the stale slot first.
+    pool = burst(repo, size=2, total=4)
+    pool._update_slot("slot-4", state="stale")
+    for i in range(1, 5):
+        age(pool, f"slot-{i}", 60)
+
+    pool._shrink()
+
+    ready = [s for s in pool.status() if s.state == "ready"]
+    assert len(ready) == 2
+
+
+def test_a_rewarm_does_not_reset_the_idle_clock(repo: Path):
+    # Never-taken slots idle from `created`. A fresh `warmed` (a lockfile
+    # rewarm during refresh) must not shield them from decay.
+    pool = burst(repo, size=1, total=3)
+    then = (datetime.now(UTC) - timedelta(days=30)).isoformat(timespec="seconds")
+    fresh = datetime.now(UTC).isoformat(timespec="seconds")
+    for i in range(1, 4):
+        pool._update_slot(f"slot-{i}", created=then, warmed=fresh, released=None)
+
+    pool._shrink()
+
+    assert len(pool.status()) == 1

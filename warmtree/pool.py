@@ -438,26 +438,29 @@ class Pool:
         outside the pool directory are the user's folders and are left
         alone, as everywhere else.
         """
-        window = config_interval(self.config.shrink_after)
+        window = config_interval(self.config.shrink_after, "shrink_after")
         if window == 0:
             return
         cutoff = datetime.now(UTC).timestamp() - window
         with self.locked():
             slots = self.load_state()
-            ready = [
-                slot for slot in slots if slot.state == "ready" and self._at_home(slot)
-            ]
-            surplus = len([s for s in slots if s.state != "taken"]) - self.config.size
+            all_ready = [slot for slot in slots if slot.state == "ready"]
+            removable = [slot for slot in all_ready if self._at_home(slot)]
+            # The floor guards READY slots specifically: warming and stale
+            # slots may never make it back, so they earn no credit toward
+            # size, or trimming could leave fewer ready than configured.
+            surplus = len(all_ready) - self.config.size
             if surplus <= 0:
                 return
-            idle_first = sorted(
-                ready, key=lambda s: s.released or s.warmed or s.created
-            )
+            # The idle clock is released, or created for a slot never
+            # taken. warmed is deliberately not consulted: a rewarm after
+            # a lockfile change would reset the clock of an unused slot.
+            idle_first = sorted(removable, key=lambda s: s.released or s.created)
             trimmed = 0
             for slot in idle_first:
                 if trimmed >= surplus:
                     break
-                stamp = slot.released or slot.warmed or slot.created
+                stamp = slot.released or slot.created
                 if datetime.fromisoformat(stamp).timestamp() > cutoff:
                     break  # everything after this is younger still
                 git.worktree_remove(self.repo_root, Path(slot.path))

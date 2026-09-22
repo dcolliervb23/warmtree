@@ -78,18 +78,18 @@ def parse(text: str) -> Config:
     for key in ("refresh_every", "shrink_after"):
         value = values.get(key, getattr(Config, key))
         if isinstance(value, str):
-            interval_seconds(value)  # raises ConfigError on a bad format
+            interval_seconds(value, key)  # raises ConfigError on a bad format
     return Config(**values)  # type: ignore[arg-type]
 
 
-def interval_seconds(value: str) -> int:
-    """`refresh_every` as seconds. "off" or "0" disables and returns 0."""
+def interval_seconds(value: str, setting: str = "refresh_every") -> int:
+    """An interval setting as seconds. "off" or "0" disables and returns 0."""
     if value in ("off", "0"):
         return 0
     match = re.fullmatch(r"(\d+)([mhd])", value)
     if match is None:
         raise ConfigError(
-            '[pool] refresh_every must look like 30m, 24h, or 7d, or be "off"'
+            f'[pool] {setting} must look like 30m, 24h, or 7d, or be "off"'
         )
     return int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
 
