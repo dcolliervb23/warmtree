@@ -239,13 +239,21 @@ class Pool:
                 self.save_state(slots)
             if claimed:
                 slot = claimed
-                _checkout(self.repo_root, Path(slot.path), branch, from_ref or "HEAD")
+                _checkout(self.repo_root, Path(slot.path), branch, from_ref, self.log)
                 cold = False
             else:
                 name = _next_name(slots)
                 path = self.dir / name
-                start = from_ref or self.base()
-                git.worktree_add_branch(self.repo_root, path, branch, start)
+                if (
+                    from_ref is None
+                    and not git.branch_exists(self.repo_root, branch)
+                    and git.ref_exists(self.repo_root, f"origin/{branch}")
+                ):
+                    git.worktree_add_tracking(self.repo_root, path, branch)
+                    self.log(f"created {branch} from origin/{branch}")
+                else:
+                    start = from_ref or self.base()
+                    git.worktree_add_branch(self.repo_root, path, branch, start)
                 slot = Slot(name=name, path=str(path), state="taken", created=_now())
                 slots.append(slot)
                 cold = True
@@ -640,11 +648,36 @@ class Pool:
         )
 
 
-def _checkout(repo_root: Path, path: Path, branch: str, start: str) -> None:
+def _checkout(
+    repo_root: Path,
+    path: Path,
+    branch: str,
+    from_ref: str | None,
+    log: Callable[[str], None],
+) -> None:
+    """Put `branch` on the slot the way `git checkout` would.
+
+    A branch that exists only on origin is created from origin and tracks
+    it — handing back a fresh branch wearing a remote branch's name invites
+    a force-push over someone's open pull request. When both exist and
+    disagree, say so: the next command should be an informed one.
+    """
+    remote = f"origin/{branch}"
     if git.branch_exists(repo_root, branch):
         git.checkout_branch(path, branch)
+        if git.ref_exists(repo_root, remote):
+            local_tip = git.rev_parse(repo_root, branch)
+            remote_tip = git.rev_parse(repo_root, remote)
+            if local_tip != remote_tip:
+                log(
+                    f"note: {branch} ({local_tip[:7]}) and {remote} "
+                    f"({remote_tip[:7]}) differ; reconcile before pushing"
+                )
+    elif from_ref is None and git.ref_exists(repo_root, remote):
+        git.checkout_tracking_branch(path, branch)
+        log(f"created {branch} from {remote}")
     else:
-        git.checkout_new_branch(path, branch, start)
+        git.checkout_new_branch(path, branch, from_ref or "HEAD")
 
 
 def _find(slots: list[Slot], name: str) -> Slot:

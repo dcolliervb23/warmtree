@@ -5,8 +5,11 @@ description: Get an isolated git worktree for a branch in under a second from th
 
 # warmtree
 
-This repo keeps a pool of pre-warmed git worktrees called slots: dependencies
-installed, env files copied, parked on the base branch with a detached HEAD.
+This repo keeps a pool of pre-warmed git worktrees called slots: parked on
+the base branch with a detached HEAD, dependencies installed and env files
+copied when `.warmtree.toml`'s `[warm]` section says how. With an empty
+`run`, slots are bare checkouts; `warmtree fill` says so when it
+recognizes a lockfile in the repo.
 `warmtree take` hands you one instantly.
 
 Where `.warmtree.toml` exists, warmtree is the default, not a fallback:
@@ -67,7 +70,11 @@ cd "$(warmtree take <branch>)"          # bash / zsh
 cd (warmtree take <branch>)             # PowerShell
 ```
 
-Creates `<branch>` from the base branch, or checks it out if it exists.
+Checks out `<branch>` if it exists — locally, or on origin, where the new
+local branch is created from the remote and tracks it, never a fresh branch
+wearing the remote's name. Otherwise creates it from the base branch. When
+local and origin tips differ, a note on stderr says so; reconcile before
+pushing.
 Options:
 
 - `--from <ref>`: start the new branch somewhere other than base.

@@ -20,6 +20,26 @@ from warmtree.git import GitError
 from warmtree.pool import REFRESH_STAMP, Pool, PoolError, Slot
 from warmtree.warm import WarmError
 
+# Suggested install commands per lockfile. warmtree never guesses `run` —
+# nothing is written to the config — but it does suggest, in init's output
+# and in fill's warning when `run` is empty.
+INSTALL_HINTS = {
+    "package-lock.json": "npm ci",
+    "pnpm-lock.yaml": "pnpm install --frozen-lockfile",
+    "yarn.lock": "yarn install --frozen-lockfile",
+    "bun.lockb": "bun install --frozen-lockfile",
+    "bun.lock": "bun install --frozen-lockfile",
+    "uv.lock": "uv sync",
+    "poetry.lock": "poetry install",
+    "Pipfile.lock": "pipenv install --deploy",
+    "requirements.txt": "pip install -r requirements.txt",
+    "Cargo.lock": "cargo fetch",
+    "go.sum": "go mod download",
+    "packages.lock.json": "dotnet restore --locked-mode",
+    "Gemfile.lock": "bundle install",
+    "composer.lock": "composer install",
+}
+
 # Lockfiles `init` looks for to pre-fill `lockfiles`. It never guesses `run`.
 KNOWN_LOCKFILES = (
     "package-lock.json",
@@ -237,7 +257,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"wrote {target}")
     if lockfiles:
         print(f"lockfiles: {', '.join(lockfiles)}")
-    print("edit [warm] run to add your install command; warmtree never guesses it")
+    hint = next((INSTALL_HINTS[n] for n in INSTALL_HINTS if (root / n).exists()), None)
+    if hint:
+        print(
+            "edit [warm] run to add your install command; warmtree never "
+            f'guesses it, but this repo suggests run = ["{hint}"]'
+        )
+    else:
+        print("edit [warm] run to add your install command; warmtree never guesses it")
     if args.user_skill:
         home = Path.home()
         targets = skill.detect_user(home)
@@ -356,6 +383,24 @@ def cmd_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_unwarmed(pool: Pool) -> None:
+    """Say plainly when slots are bare checkouts, and how to fix it.
+
+    The pool's pitch is dependencies installed; with `run` empty that is
+    not what fill produces, and the gap has real costs downstream (#17).
+    """
+    if pool.config.run:
+        return
+    for name, hint in INSTALL_HINTS.items():
+        if (pool.repo_root / name).exists():
+            note(
+                f"warm.run is empty, so slots have no dependencies "
+                f"installed; this repo has {name}, consider "
+                f'run = ["{hint}"] in {CONFIG_NAME}'
+            )
+            return
+
+
 def _report_skill(
     root: Path, results: list[skill.Installed], user: bool = False
 ) -> None:
@@ -376,6 +421,7 @@ def cmd_fill(args: argparse.Namespace) -> int:
     if not created:
         ready = sum(1 for slot in pool.status() if slot.state == "ready")
         print(f"pool is full ({ready} ready)")
+    _warn_if_unwarmed(pool)
     _maybe_auto_refresh(pool)
     return 0
 
