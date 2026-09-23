@@ -33,6 +33,9 @@ class Config:
     # How stale the pool may get before an ordinary command spawns a
     # background `refresh --fetch`. "off" disables the self-refresh.
     refresh_every: str = "24h"
+    # How long surplus ready slots may sit unused before refresh trims the
+    # pool back down to `size`. "off" keeps every slot forever.
+    shrink_after: str = "14d"
 
 
 # Which keys live in which table, and the TOML type each must have.
@@ -46,6 +49,7 @@ _SCHEMA: dict[str, dict[str, type]] = {
         "lockfiles": list,
         "git_hooks": bool,
         "refresh_every": str,
+        "shrink_after": str,
     },
     "warm": {"run": list, "copy": list, "env": bool},
 }
@@ -71,20 +75,21 @@ def parse(text: str) -> Config:
     size = values.get("size", Config.size)
     if isinstance(size, int) and size < 0:
         raise ConfigError("[pool] size must be zero or more")
-    every = values.get("refresh_every", Config.refresh_every)
-    if isinstance(every, str):
-        interval_seconds(every)  # raises ConfigError on a bad format
+    for key in ("refresh_every", "shrink_after"):
+        value = values.get(key, getattr(Config, key))
+        if isinstance(value, str):
+            interval_seconds(value, key)  # raises ConfigError on a bad format
     return Config(**values)  # type: ignore[arg-type]
 
 
-def interval_seconds(value: str) -> int:
-    """`refresh_every` as seconds. "off" or "0" disables and returns 0."""
+def interval_seconds(value: str, setting: str = "refresh_every") -> int:
+    """An interval setting as seconds. "off" or "0" disables and returns 0."""
     if value in ("off", "0"):
         return 0
     match = re.fullmatch(r"(\d+)([mhd])", value)
     if match is None:
         raise ConfigError(
-            '[pool] refresh_every must look like 30m, 24h, or 7d, or be "off"'
+            f'[pool] {setting} must look like 30m, 24h, or 7d, or be "off"'
         )
     return int(match.group(1)) * {"m": 60, "h": 3600, "d": 86400}[match.group(2)]
 
@@ -165,6 +170,7 @@ size = 2                     # slots to keep ready
 lockfiles = {lockfiles_toml}  # re-warm a slot only when one of these changes
 # git_hooks = false          # run the repo's git hooks during pool operations
 # refresh_every = "24h"      # self-refresh when the pool is staler; "off" disables
+# shrink_after = "14d"       # trim unused surplus slots back to size; "off" keeps them
 
 [warm]
 run = []                     # run inside a slot at fill and refresh, e.g. ["npm ci"]

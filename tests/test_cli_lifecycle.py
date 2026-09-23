@@ -33,7 +33,7 @@ def test_take_prints_only_the_path_on_stdout(
     assert out.count("\n") == 1
     assert path.is_dir()
     assert git.head_branch(path) == "feature/a"
-    assert "slot-1" in err
+    assert "slot-2" in err
 
 
 def test_take_refills_the_pool_by_default(
@@ -113,7 +113,7 @@ def test_release_via_cli(
 
     assert main(["release", "feature/a"]) == 0
 
-    assert "released slot-1" in capsys.readouterr().out
+    assert "released slot-2" in capsys.readouterr().out
     assert {s["state"] for s in status_json(capsys)} == {"ready"}
 
 

@@ -153,7 +153,7 @@ def test_refresh_skips_taken_slots(warm_repo: Path):
 
     results = pool.refresh()
 
-    assert [r.slot.name for r in results] == ["slot-2"]
+    assert [r.slot.name for r in results] == ["slot-1"]
     assert git.head_branch(Path(taken.path)) == "feature/a"
 
 

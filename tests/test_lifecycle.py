@@ -27,14 +27,16 @@ def branches(repo: Path) -> set[str]:
 # --- take ---------------------------------------------------------------
 
 
-def test_take_creates_branch_from_base_in_oldest_ready_slot(repo: Path):
+def test_take_claims_the_most_recently_warmed_ready_slot(repo: Path):
     pool = Pool(repo, Config(size=2))
     pool.fill()
 
     slot, cold = pool.take("feature/a")
 
     assert cold is False
-    assert slot.name == "slot-1"
+    # Hot allocation: the freshest slot is claimed so colder ones can
+    # idle out and be shrunk away.
+    assert slot.name == "slot-2"
     assert slot.state == "taken"
     assert slot.branch == "feature/a"
     path = Path(slot.path)
@@ -107,7 +109,7 @@ def test_take_branch_already_in_another_slot_fails_and_keeps_slot_ready(repo: Pa
         pool.take("same")
 
     states = {s.name: s.state for s in pool.status()}
-    assert states == {"slot-1": "taken", "slot-2": "ready"}
+    assert states == {"slot-1": "ready", "slot-2": "taken"}
 
 
 # --- release ------------------------------------------------------------

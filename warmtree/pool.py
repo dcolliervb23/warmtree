@@ -22,6 +22,7 @@ from pathlib import Path
 
 from warmtree import git, warm
 from warmtree.config import Config, pool_dir
+from warmtree.config import interval_seconds as config_interval
 from warmtree.lock import FileLock
 
 STATE_FILE = "state.json"
@@ -57,6 +58,9 @@ class Slot:
     # defaults so state files from older versions load unchanged.
     lease_pid: int | None = None
     lease_since: str | None = None
+    # When the slot last went back to ready. The idle clock for shrinking;
+    # a fill-created slot that was never taken idles from `created`.
+    released: str | None = None
 
     @property
     def number(self) -> int:
@@ -188,7 +192,9 @@ class Pool:
     ) -> tuple[Slot, bool]:
         """Claim a slot for `branch`. Returns the slot and whether it was cold.
 
-        The oldest ready slot gets `branch` checked out. A new branch starts
+        The most recently used ready slot gets `branch` checked out — hot
+        allocation keeps cold surplus idle so shrinking can reclaim it. A
+        new branch starts
         at `from_ref` when given, and otherwise where the slot is parked:
         refresh positioned it on the freshest known base, and re-resolving
         the local base here would drag the slot back to a stale commit. Only
@@ -202,9 +208,17 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
+            # Most recently used first: concentrating takes in hot slots
+            # lets the surplus go genuinely idle, which is what allows
+            # shrinking to reclaim it. Round-robin would reset every
+            # slot's idle clock in turn and nothing would ever decay.
             ready = sorted(
                 (slot for slot in slots if slot.state == "ready"),
-                key=lambda slot: (slot.warmed or slot.created, slot.name),
+                key=lambda slot: (
+                    slot.released or slot.warmed or slot.created,
+                    slot.name,
+                ),
+                reverse=True,
             )
             # A ready slot must be parked detached. One with a branch checked
             # out was hijacked behind warmtree's back (a manual checkout in
@@ -327,6 +341,7 @@ class Pool:
             slot.branch = None
             slot.lease_pid = None
             slot.lease_since = None
+            slot.released = _now()
             self.save_state(slots)
             return slot, branch_deleted
 
@@ -390,6 +405,11 @@ class Pool:
             if git.ref_exists(self.repo_root, remote_ref):
                 base_ref = remote_ref
 
+        # Shrink first: a surplus slot due for trimming must not have its
+        # lockfiles re-warmed moments before deletion, and a warm failure
+        # below must not cancel reclamation. Slots recovered from stale in
+        # this pass get their shrink consideration on the next one.
+        self._shrink()
         with self.locked():
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
@@ -421,6 +441,52 @@ class Pool:
             self.dir.mkdir(parents=True, exist_ok=True)
             (self.dir / REFRESH_STAMP).touch()
         return results
+
+    def _shrink(self) -> None:
+        """Trim surplus ready slots that idled past `shrink_after`.
+
+        A burst grows the pool; this is how it comes back down. `size` is
+        the floor — the pool never trims below its configured ready count —
+        and the clock is per slot: released (or created, for a slot never
+        taken) older than the window. Oldest idle goes first. Slots living
+        outside the pool directory are the user's folders and are left
+        alone, as everywhere else.
+        """
+        window = config_interval(self.config.shrink_after, "shrink_after")
+        if window == 0:
+            return
+        cutoff = datetime.now(UTC).timestamp() - window
+        with self.locked():
+            slots = self.load_state()
+            all_ready = [slot for slot in slots if slot.state == "ready"]
+            removable = [slot for slot in all_ready if self._at_home(slot)]
+            # The floor guards READY slots specifically: warming and stale
+            # slots may never make it back, so they earn no credit toward
+            # size, or trimming could leave fewer ready than configured.
+            surplus = len(all_ready) - self.config.size
+            if surplus <= 0:
+                return
+            # The idle clock is released, or created for a slot never
+            # taken. warmed is deliberately not consulted: a rewarm after
+            # a lockfile change would reset the clock of an unused slot.
+            idle_first = sorted(removable, key=lambda s: s.released or s.created)
+            trimmed = 0
+            for slot in idle_first:
+                if trimmed >= surplus:
+                    break
+                stamp = slot.released or slot.created
+                if datetime.fromisoformat(stamp).timestamp() > cutoff:
+                    break  # everything after this is younger still
+                git.worktree_remove(self.repo_root, Path(slot.path))
+                slots.remove(slot)
+                # Persist immediately: a failure removing the next slot
+                # must not leave state listing this already-deleted one.
+                self.save_state(slots)
+                trimmed += 1
+                self.log(
+                    f"trimmed {slot.name}: unused since {stamp}, "
+                    f"pool heading back to {self.config.size} ready"
+                )
 
     def _at_home(self, slot: Slot) -> bool:
         """Whether the slot's folder lives in the pool directory."""
