@@ -157,6 +157,15 @@ def owns_worktree(repo: Path, path: Path) -> bool:
     )
 
 
+def is_ancestor(repo: Path, ref: str, of: str) -> bool:
+    """Whether `ref` is reachable from `of` — merged, in branch terms."""
+    try:
+        run(["merge-base", "--is-ancestor", ref, of], cwd=repo)
+    except GitError:
+        return False
+    return True
+
+
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))
@@ -222,11 +231,14 @@ def reset_to_detached(path: Path, ref: str) -> None:
     run(["clean", "-fd", "--quiet"], cwd=path)
 
 
-def branch_delete(repo: Path, name: str) -> bool:
+def branch_delete(repo: Path, name: str, force: bool = False) -> bool:
     """Delete a fully merged branch. Returns False if git refused, which is
-    what happens when the branch has commits not yet merged anywhere."""
+    what happens when the branch has commits not yet merged anywhere.
+    force skips git's own merged check — for callers that already hold a
+    stronger certificate, like sweep's is-ancestor against origin/base."""
+    flag = "--delete" if not force else "-D"
     try:
-        run(["branch", "--delete", name], cwd=repo)
+        run(["branch", flag, name], cwd=repo)
     except GitError:
         return False
     return True

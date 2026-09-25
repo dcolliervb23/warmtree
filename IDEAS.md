@@ -27,9 +27,6 @@ Append here instead of expanding DESIGN.md.
   a full node_modules on disk. Needs `max_size`, and shrinking back toward
   the configured size edges into daemon territory. Cold fallback plus the
   skill telling agents to grow before fanning out covers most of it today.
-- **`release --merged`: sweep taken slots whose branch is merged.** The same
-  local `git branch -d` test release already uses, applied across the pool.
-  Cleanup confined to worktrees warmtree owns, no forge APIs.
 - **Reflink spike results (2026-09-13, spike/reflink branch).** Measured on
   real btrfs, xfs, and apfs via CI loop mounts: cloning a 529 MB, 45,000-file
   synthetic node_modules took 2.4s / 4.0s / 10.6s — only 1-3x faster than a

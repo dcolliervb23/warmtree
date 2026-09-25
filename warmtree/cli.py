@@ -191,6 +191,25 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("path", help="path of the worktree to adopt")
     adopt.set_defaults(func=cmd_adopt)
 
+    sweep = commands.add_parser(
+        "sweep",
+        help="fold finished work back into the pool",
+        description="Release taken slots whose branch is merged into base, "
+        "and adopt-then-release hand-made worktrees whose branch is merged, "
+        "folding their folders and dependencies into the pool. Dirty trees, "
+        "unmerged branches, and slots other sessions hold are skipped with "
+        "a reason. Squash-merged branches are not detected: their commits "
+        "are not ancestors of base.",
+        epilog="onboarding a repo with a pile of old worktrees: "
+        "warmtree init, then warmtree sweep --fetch",
+    )
+    sweep.add_argument(
+        "--fetch",
+        action="store_true",
+        help="fetch origin first, so branches merged only upstream count",
+    )
+    sweep.set_defaults(func=cmd_sweep)
+
     exec_cmd = commands.add_parser(
         "exec", help="run a command inside the slot holding a branch"
     )
@@ -506,6 +525,21 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     note(f"adopted {args.path} as {slot.name} (branch {slot.branch})")
     note("nothing moved; the folder joins the pool when the branch is released")
     print(slot.path)
+    return 0
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    results = _pool().sweep(fetch=args.fetch)
+    folded = 0
+    for item in results:
+        if item.action in ("released", "folded"):
+            folded += 1
+            print(f"{item.action}: {item.name} ({item.branch})")
+        elif item.action == "skipped":
+            note(f"skipped {item.name} ({item.branch}): {item.reason}")
+    kept = sum(1 for item in results if item.action == "kept")
+    skipped = sum(1 for item in results if item.action == "skipped")
+    print(f"swept {folded} into the pool; kept {kept} in flight; skipped {skipped}")
     return 0
 
 

@@ -82,6 +82,16 @@ class Refreshed:
 
 
 @dataclass
+class Swept:
+    """One sweep decision: what was looked at and what happened to it."""
+
+    name: str  # slot name, or a worktree path
+    branch: str | None
+    action: str  # released | folded | kept | skipped
+    reason: str
+
+
+@dataclass
 class Finding:
     """One problem `doctor` found, and what it did or suggests."""
 
@@ -299,6 +309,11 @@ class Pool:
             slots = self.load_state()
             slot = _find_taken(slots, branch)
             path = Path(slot.path)
+            if not git.owns_worktree(self.repo_root, path):
+                raise PoolError(
+                    f"{slot.name} is no longer a working tree of this "
+                    "repository; run `warmtree doctor`"
+                )
             if (
                 not force
                 and slot.lease_pid is not None
@@ -385,6 +400,80 @@ class Pool:
             slots.append(slot)
             self.save_state(slots)
             return slot
+
+    def sweep(self, fetch: bool = False) -> list["Swept"]:
+        """Fold finished work back into the pool.
+
+        Two passes with one test: a branch git certifies as merged into
+        base. Taken slots on merged branches are released; hand-made
+        worktrees on merged branches are adopted and released in one
+        motion, so their folders and dependencies join the pool. Dirty
+        trees, unmerged branches, slots other live sessions hold, and
+        anything that is not ours are skipped with a reason. Squash-merged
+        branches are not detected: their commits are not ancestors of base.
+        """
+        if fetch:
+            git.fetch(self.repo_root)
+        base_ref = self.base()
+        remote_ref = f"origin/{base_ref}"
+        if git.ref_exists(self.repo_root, remote_ref):
+            base_ref = remote_ref
+        results: list[Swept] = []
+
+        def merged(branch: str) -> bool:
+            return git.is_ancestor(self.repo_root, branch, base_ref)
+
+        for slot in self.status():
+            if slot.state != "taken" or slot.branch is None:
+                continue
+            if not merged(slot.branch):
+                results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
+                continue
+            try:
+                self.release(slot.branch)
+                self._certified_delete(slot.branch)
+                results.append(Swept(slot.name, slot.branch, "released", "merged"))
+            except PoolError as exc:
+                results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
+
+        known = {Path(s.path).resolve() for s in self.status()}
+        known.add(self.repo_root.resolve())
+        for path in git.worktree_list(self.repo_root):
+            if path in known:
+                continue
+            label = str(path)
+            if not git.owns_worktree(self.repo_root, path):
+                continue  # not ours to reason about
+            branch = git.head_branch(path)
+            if branch is None:
+                results.append(Swept(label, None, "kept", "detached HEAD"))
+                continue
+            if not merged(branch):
+                results.append(Swept(label, branch, "kept", "not merged"))
+                continue
+            if git.is_dirty(path):
+                results.append(Swept(label, branch, "skipped", "uncommitted changes"))
+                continue
+            try:
+                self.adopt(path)
+                self.release(branch)
+                self._certified_delete(branch)
+                results.append(Swept(label, branch, "folded", "merged"))
+            except (PoolError, git.GitError) as exc:
+                results.append(Swept(label, branch, "skipped", str(exc)))
+        return results
+
+    def _certified_delete(self, branch: str) -> None:
+        """Remove a branch sweep has already certified as merged.
+
+        release's own deletion validates against the LOCAL base, so with a
+        stale local base a branch merged only upstream survives it — and
+        sweep would report a fold that was not. The is-ancestor check
+        against sweep's base ref is the stronger certificate, so the
+        deletion is finished under it.
+        """
+        if git.branch_exists(self.repo_root, branch):
+            git.branch_delete(self.repo_root, branch, force=True)
 
     def refresh(self, fetch: bool = False) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.
