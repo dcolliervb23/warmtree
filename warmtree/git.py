@@ -157,6 +157,15 @@ def owns_worktree(repo: Path, path: Path) -> bool:
     )
 
 
+def is_ancestor(repo: Path, ref: str, of: str) -> bool:
+    """Whether `ref` is reachable from `of` — merged, in branch terms."""
+    try:
+        run(["merge-base", "--is-ancestor", ref, of], cwd=repo)
+    except GitError:
+        return False
+    return True
+
+
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))
