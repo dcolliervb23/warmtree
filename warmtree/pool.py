@@ -309,6 +309,11 @@ class Pool:
             slots = self.load_state()
             slot = _find_taken(slots, branch)
             path = Path(slot.path)
+            if not git.owns_worktree(self.repo_root, path):
+                raise PoolError(
+                    f"{slot.name} is no longer a working tree of this "
+                    "repository; run `warmtree doctor`"
+                )
             if (
                 not force
                 and slot.lease_pid is not None
@@ -426,6 +431,7 @@ class Pool:
                 continue
             try:
                 self.release(slot.branch)
+                self._certified_delete(slot.branch)
                 results.append(Swept(slot.name, slot.branch, "released", "merged"))
             except PoolError as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
@@ -451,10 +457,23 @@ class Pool:
             try:
                 self.adopt(path)
                 self.release(branch)
+                self._certified_delete(branch)
                 results.append(Swept(label, branch, "folded", "merged"))
             except (PoolError, git.GitError) as exc:
                 results.append(Swept(label, branch, "skipped", str(exc)))
         return results
+
+    def _certified_delete(self, branch: str) -> None:
+        """Remove a branch sweep has already certified as merged.
+
+        release's own deletion validates against the LOCAL base, so with a
+        stale local base a branch merged only upstream survives it — and
+        sweep would report a fold that was not. The is-ancestor check
+        against sweep's base ref is the stronger certificate, so the
+        deletion is finished under it.
+        """
+        if git.branch_exists(self.repo_root, branch):
+            git.branch_delete(self.repo_root, branch, force=True)
 
     def refresh(self, fetch: bool = False) -> list[Refreshed]:
         """Bring every waiting slot up to date, one at a time.

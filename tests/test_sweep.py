@@ -1,5 +1,6 @@
 """`sweep` folds finished work — slots and hand-made worktrees — into the pool."""
 
+import shutil
 from pathlib import Path
 
 from tests.conftest import git as run_git
@@ -98,11 +99,38 @@ def test_sweep_counts_branches_merged_only_upstream(repo: Path, tmp_path: Path):
     (wt / "u.txt").write_text("u\n")
     run_git("add", ".", cwd=wt)
     run_git("commit", "-q", "-m", "u", cwd=wt)
-    run_git("push", "-q", "-u", "origin", "upstream-done", cwd=wt)
+    # No -u: without a tracking upstream, git's own branch -d would refuse
+    # even after the merge lands upstream. Sweep's certificate must finish
+    # the deletion anyway.
+    run_git("push", "-q", "origin", "upstream-done", cwd=wt)
     merge_into_main(repo, "upstream-done")  # merged on origin; clone unaware
 
-    results = Pool(clone, Config(size=0)).sweep(fetch=True)
+    pool = Pool(clone, Config(size=0))
+    results = pool.sweep(fetch=True)
 
     [item] = [r for r in results if r.branch == "upstream-done"]
     assert item.action == "folded"
     assert not wt.exists()
+    assert not git.branch_exists(clone, "upstream-done")
+
+
+def test_sweep_never_releases_a_replaced_slot_directory(repo: Path):
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
+    slot, _ = pool.take("done")
+    (Path(slot.path) / "f.txt").write_text("x\n")
+    run_git("add", ".", cwd=Path(slot.path))
+    run_git("commit", "-q", "-m", "done", cwd=Path(slot.path))
+    merge_into_main(repo, "done")
+    # Replace the slot directory with an unrelated repository.
+    shutil.rmtree(slot.path)
+    foreign = Path(slot.path)
+    run_git("init", "-q", "-b", "innocent", str(foreign), cwd=repo)
+    (foreign / "precious.txt").write_text("someone else's files\n")
+
+    results = pool.sweep()
+
+    [item] = [r for r in results if r.branch == "done"]
+    assert item.action == "skipped"
+    assert "no longer a working tree" in item.reason
+    assert (foreign / "precious.txt").exists()  # untouched

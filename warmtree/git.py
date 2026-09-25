@@ -231,11 +231,14 @@ def reset_to_detached(path: Path, ref: str) -> None:
     run(["clean", "-fd", "--quiet"], cwd=path)
 
 
-def branch_delete(repo: Path, name: str) -> bool:
+def branch_delete(repo: Path, name: str, force: bool = False) -> bool:
     """Delete a fully merged branch. Returns False if git refused, which is
-    what happens when the branch has commits not yet merged anywhere."""
+    what happens when the branch has commits not yet merged anywhere.
+    force skips git's own merged check — for callers that already hold a
+    stronger certificate, like sweep's is-ancestor against origin/base."""
+    flag = "--delete" if not force else "-D"
     try:
-        run(["branch", "--delete", name], cwd=repo)
+        run(["branch", flag, name], cwd=repo)
     except GitError:
         return False
     return True
