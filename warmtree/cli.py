@@ -267,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Print the absolute path of the taken slot holding BRANCH. "
             "Agent harnesses reset the working directory between commands, "
             "so re-derive the slot path with this instead of relying on an "
-            "earlier cd, for example: git -C \"$(warmtree path BRANCH)\" status"
+            'earlier cd, for example: git -C "$(warmtree path BRANCH)" status'
         ),
     )
     path_cmd.add_argument("branch", help="branch to look up")
