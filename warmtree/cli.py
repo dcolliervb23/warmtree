@@ -637,7 +637,18 @@ def cmd_which(args: argparse.Namespace) -> int:
 
 
 def cmd_path(args: argparse.Namespace) -> int:
-    slot = _pool().taken(args.branch)
+    pool = _pool()
+    slot = pool.taken(args.branch)
+    path = Path(slot.path)
+    # State alone proves nothing: the directory may be gone, or replaced
+    # by something that is not our worktree. An anchor that can point at
+    # the wrong workspace is worse than none.
+    if not path.is_dir() or not git.owns_worktree(pool.repo_root, path):
+        fail(
+            f"{slot.name} is no longer a working tree of this repository; "
+            "run `warmtree doctor`"
+        )
+        return 1
     print(slot.path)
     return 0
 

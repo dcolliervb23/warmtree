@@ -225,7 +225,10 @@ class Pool:
             slots = self.load_state()
             for slot in slots:
                 if slot.state == "taken" and slot.branch == branch:
-                    if not git.owns_worktree(self.repo_root, Path(slot.path)):
+                    cpath = Path(slot.path)
+                    if not cpath.is_dir() or not git.owns_worktree(
+                        self.repo_root, cpath
+                    ):
                         raise PoolError(
                             f"{slot.name} is no longer a working tree of this "
                             "repository; run `warmtree doctor`"
@@ -241,6 +244,15 @@ class Pool:
                             f"{slot.lease_pid} (since {slot.lease_since}); "
                             "coordinate with that session before working in it"
                         )
+                    else:
+                        # The recorded holder is this session, gone, or
+                        # absent, so the repeat caller is the occupant now.
+                        # The lease must say so, or another session would
+                        # see no live holder and could release the slot
+                        # out from under it.
+                        slot.lease_pid = os.getppid()
+                        slot.lease_since = _now()
+                        self.save_state(slots)
                     return slot, False
             # Most recently used first: concentrating takes in hot slots
             # lets the surplus go genuinely idle, which is what allows
