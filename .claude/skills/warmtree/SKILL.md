@@ -66,11 +66,31 @@ For scripts, `warmtree status --json` returns a list of slots with `name`,
 ## 3. Take a slot
 
 ```sh
-cd "$(warmtree take <branch>)"          # bash / zsh
-cd (warmtree take <branch>)             # PowerShell
+warmtree take <branch>
 ```
 
-Checks out `<branch>` if it exists — locally, or on origin, where the new
+`take` prints the slot's absolute path on stdout. Record that path; it is
+your handle for everything that follows.
+
+Do not plan around `cd`. Agent harnesses reset the working directory
+between commands, and file tools resolve relative paths against the
+directory the session started in — so a `cd` into the slot quietly stops
+holding, and later commands run against the wrong worktree. Address the
+slot explicitly every time instead:
+
+- Shell commands: `git -C <slot path> ...`, or
+  `warmtree exec <branch> -- <command>`.
+- File reads and edits: absolute paths under the slot.
+- Lost the path? `warmtree path <branch>` prints it again, from anywhere
+  in the repo. Running `warmtree take <branch>` again is also safe: a
+  branch already in a taken slot gets that same slot's path back, with a
+  note on stderr.
+
+Humans in a persistent terminal can hop in directly:
+`cd "$(warmtree take <branch>)"` in bash or zsh,
+`cd (warmtree take <branch>)` in PowerShell.
+
+`take` checks out `<branch>` if it exists — locally, or on origin, where the new
 local branch is created from the remote and tracks it, never a fresh branch
 wearing the remote's name. Otherwise creates it from the base branch. When
 local and origin tips differ, a note on stderr says so; reconcile before
@@ -142,12 +162,14 @@ abandoned.
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
+| `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 
 ## Quick reference
 
 | Command | Purpose |
 |---|---|
 | `warmtree which` | Am I in a slot? |
+| `warmtree path <branch>` | Print the taken slot's absolute path for a branch. |
 | `warmtree size` | Configured size and counts. `warmtree size N` grows or shrinks to N. |
 | `warmtree status [--json]` | Every slot and its state. |
 | `warmtree take <branch> [--from REF] [--json] [--refill-background]` | Claim a slot, print its path (or JSON). |
