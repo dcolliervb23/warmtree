@@ -260,6 +260,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     which.set_defaults(func=cmd_which)
 
+    path_cmd = commands.add_parser(
+        "path",
+        help="print the path of the slot holding a taken branch",
+        description=(
+            "Print the absolute path of the taken slot holding BRANCH. "
+            "Agent harnesses reset the working directory between commands, "
+            "so re-derive the slot path with this instead of relying on an "
+            "earlier cd, for example: git -C \"$(warmtree path BRANCH)\" status"
+        ),
+    )
+    path_cmd.add_argument("branch", help="branch to look up")
+    path_cmd.set_defaults(func=cmd_path)
+
     status = commands.add_parser("status", help="show every slot")
     status.add_argument("--json", action="store_true", help="print JSON for agents")
     status.add_argument(
@@ -466,10 +479,6 @@ def cmd_take(args: argparse.Namespace) -> int:
     pool = _pool()
     slot, cold = pool.take(args.branch, from_ref=args.from_ref, scratch=args.scratch)
     branch = slot.branch
-    if cold:
-        note(f"no ready slot; created {slot.name} cold for {branch}")
-    else:
-        note(f"took {slot.name} for {branch}")
     if args.scratch:
         note(f"scratch branch: {branch}; release it with `warmtree release {branch}`")
     if args.json:
@@ -625,6 +634,12 @@ def cmd_which(args: argparse.Namespace) -> int:
             return 0
     fail("not inside a warmtree slot")
     return 1
+
+
+def cmd_path(args: argparse.Namespace) -> int:
+    slot = _pool().taken(args.branch)
+    print(slot.path)
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:

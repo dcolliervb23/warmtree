@@ -211,6 +211,11 @@ class Pool:
         the cold path, which has no parked position, resolves base itself.
         With scratch=True the branch name is generated under the claim lock,
         so two concurrent scratch takes can never pick the same name.
+
+        Taking a branch that is already in a taken slot returns that slot
+        again instead of failing: a repeat take is usually an agent that
+        lost track of its working directory re-finding the path, so the
+        path is the right answer, not git's "already checked out" error.
         """
         with self.locked():
             if scratch:
@@ -218,6 +223,25 @@ class Pool:
             if branch is None:
                 raise PoolError("take needs a branch name")
             slots = self.load_state()
+            for slot in slots:
+                if slot.state == "taken" and slot.branch == branch:
+                    if not git.owns_worktree(self.repo_root, Path(slot.path)):
+                        raise PoolError(
+                            f"{slot.name} is no longer a working tree of this "
+                            "repository; run `warmtree doctor`"
+                        )
+                    self.log(f"{branch} is already taken in {slot.name}")
+                    if (
+                        slot.lease_pid is not None
+                        and slot.lease_pid != os.getppid()
+                        and _pid_alive(slot.lease_pid)
+                    ):
+                        self.log(
+                            f"note: {slot.name} is held by process "
+                            f"{slot.lease_pid} (since {slot.lease_since}); "
+                            "coordinate with that session before working in it"
+                        )
+                    return slot, False
             # Most recently used first: concentrating takes in hot slots
             # lets the surplus go genuinely idle, which is what allows
             # shrinking to reclaim it. Round-robin would reset every
@@ -288,6 +312,10 @@ class Pool:
             slot.lease_pid = os.getppid()
             slot.lease_since = _now()
             self.save_state(slots)
+            if cold:
+                self.log(f"no ready slot; created {slot.name} cold for {branch}")
+            else:
+                self.log(f"took {slot.name} for {branch}")
             return slot, cold
 
     def release(
