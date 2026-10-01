@@ -100,14 +100,15 @@ def test_cold_create_uses_next_free_slot_name(repo: Path):
     assert slot.name == "slot-2"
 
 
-def test_take_branch_already_in_another_slot_fails_and_keeps_slot_ready(repo: Path):
+def test_take_branch_already_in_a_taken_slot_returns_that_slot(repo: Path):
     pool = Pool(repo, Config(size=2))
     pool.fill()
-    pool.take("same")
+    first, _ = pool.take("same")
 
-    with pytest.raises(git.GitError):
-        pool.take("same")
+    again, cold = pool.take("same")
 
+    assert (again.name, again.path) == (first.name, first.path)
+    assert cold is False
     states = {s.name: s.state for s in pool.status()}
     assert states == {"slot-1": "ready", "slot-2": "taken"}
 

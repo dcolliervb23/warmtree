@@ -127,7 +127,7 @@ branches are left exactly where they are.
 | `warmtree instructions [--repo] [--tool T]` | Add a marked prefer-warmtree block to agent instruction files — your user-level ones by default (`~/.claude/CLAUDE.md`, `~/.copilot/copilot-instructions.md`, `~/.codex/AGENTS.md`), or the repo's with `--repo`. Only the marked block is ever touched; re-runs update it in place. |
 | `warmtree skill [--tool T] [--user] [--force]` | Install or refresh the agent skill in the tool folders this repo uses, or in the ones named with `--tool`. `--user` installs into the tools' personal skills folders in your home directory (`~/.claude/skills`, `~/.copilot/skills`, `~/.codex/skills`, `~/.cursor/skills`) so no repo ever contains the file; it works outside a repo and covers every repo at once. Never overwrites an edited copy without `--force`. |
 | `warmtree fill` | Create slots until `size` are ready. Each slot is a worktree with a detached HEAD at the base branch, with `copy` files copied in and `run` commands executed. |
-| `warmtree take <branch> [--from REF]` | Claim the oldest ready slot. Checks out `<branch>` if it exists — locally, or on origin, where the local branch is created from the remote and tracks it. Otherwise creates it from `REF` or the base. Notes on stderr when local and origin tips differ. Prints the path, then refills the pool. |
+| `warmtree take <branch> [--from REF]` | Claim the most recently used ready slot. Checks out `<branch>` if it exists — locally, or on origin, where the local branch is created from the remote and tracks it. Otherwise creates it from `REF` or the base. Notes on stderr when local and origin tips differ. Prints the path, then refills the pool. Taking a branch that is already in a taken slot prints that same slot's path again instead of failing. |
 | `warmtree take --scratch` | Claim a slot on a generated `scratch/<id>` branch, for throwaway work that does not deserve a name. |
 | `warmtree take ... --no-refill` | Skip the refill. |
 | `warmtree take ... --json` | Print a JSON object (`path`, `slot`, `branch`, `cold`) instead of the bare path. |
@@ -139,6 +139,7 @@ branches are left exactly where they are.
 | `warmtree refresh [--fetch]` | Move every waiting slot to the current base commit and re-copy files. `--fetch` fetches first and parks slots on `origin/<base>`, so they track the remote even when your local base branch is behind; your own checkout is never touched. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
+| `warmtree path <branch>` | Print the absolute path of the taken slot holding `<branch>`. Made for agents, whose harnesses reset the working directory between commands: `git -C "$(warmtree path <branch>)" status` works no matter how often that happens. Exit 1 if the branch is not in a taken slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots and their worktree registrations. Taken slots need `--force`. |
 | `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk; with `--json` it adds a `du_bytes` field per slot. |
 | `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, ready slots hijacked by a stray checkout, untracked directories in the pool. `--fix` applies the safe repairs. |
@@ -242,9 +243,12 @@ A copy you have edited is never overwritten without `--force`. Pass
 If your project uses an `AGENTS.md` instead, this paragraph is enough:
 
 > This repo has a warmtree pool. When you need an isolated workspace, run
-> `warmtree take <branch>` and `cd` into the printed path instead of
-> `git worktree add`. Run `warmtree which` first to see if you are already in
-> a slot, and `warmtree size` to check how many are ready before starting
+> `warmtree take <branch>` instead of `git worktree add`; it prints the
+> slot's path. Address the slot by that path (`git -C`, absolute file
+> paths) rather than relying on `cd` — the working directory resets
+> between commands, and `warmtree path <branch>` re-prints the path any
+> time. Run `warmtree which` first to see if you are already in a slot,
+> and `warmtree size` to check how many are ready before starting
 > parallel work. When the branch is merged, run `warmtree release <branch>`.
 
 Claude Code's built-in worktree feature is not intercepted. The skill is the

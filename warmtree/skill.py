@@ -26,7 +26,8 @@ SHIPPED_SKILL_HASHES = (
     "8bebc1e0a4a8b80a548cd0377c3b5bcd82cae74ddc82990c56c3cbd029bfad59",  # v0.5.0
     "4bf2b7dbe37cfb6a8cee7f9a9b4964118ba75e29996d0dd5a21e06c155663ff4",  # v0.7.0
     "2bd0bf56511ef74bfac8fb03d6370a8860d19b31ed2807f058d2eae6cc9449db",  # v0.8.0
-    "b359e13b7f95826c98c28eb351a0c58d8a6867d0b7809c4bcd1f07e792b45497",  # unreleased
+    "b359e13b7f95826c98c28eb351a0c58d8a6867d0b7809c4bcd1f07e792b45497",  # v0.9.0
+    "dc1f97f75b77e3966cb427bc0cb5e5ca51d243322728649240001913b9a6b23e",  # unreleased
 )
 
 
@@ -174,9 +175,12 @@ worktrees. Prefer the pool over creating checkouts from scratch:
 - Begin branch work with `warmtree which`, and check capacity with
   `warmtree size` before fanning out.
 - Claim a workspace instead of running `git worktree add` or a fresh
-  checkout: `cd "$(warmtree take <branch>)"` in bash or zsh,
-  `cd (warmtree take <branch>)` in PowerShell. Return it with
-  `warmtree release <branch>` once the branch is merged or abandoned.
+  checkout: `warmtree take <branch>` prints the slot's path. Return it
+  with `warmtree release <branch>` once the branch is merged or abandoned.
+- Do not count on a `cd` into a slot persisting: agent harnesses reset
+  the working directory between commands. Address the slot by its path —
+  `git -C "$(warmtree path <branch>)" <args>`, `warmtree exec <branch> --
+  <command>`, and absolute paths for file edits.
 - The `warmtree` skill documents the full workflow.
 
 This is a strong preference, not a prohibition: use plain git when warmtree
