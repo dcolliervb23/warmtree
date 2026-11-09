@@ -198,8 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
         "and adopt-then-release hand-made worktrees whose branch is merged, "
         "folding their folders and dependencies into the pool. Dirty trees, "
         "unmerged branches, and slots other sessions hold are skipped with "
-        "a reason. Squash-merged branches are not detected: their commits "
-        "are not ancestors of base.",
+        "a reason. Squash merges are detected when the full branch patch "
+        "matches a base commit; their local branches are kept.",
         epilog="onboarding a repo with a pile of old worktrees: "
         "warmtree init, then warmtree sweep --fetch",
     )
@@ -207,6 +207,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch",
         action="store_true",
         help="fetch origin first, so branches merged only upstream count",
+    )
+    sweep.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="list uncommitted files and ask before discarding and releasing",
+    )
+    sweep.add_argument(
+        "--older-than",
+        help="release old clean slots, keeping unmerged branches (e.g. 7d)",
     )
     sweep.set_defaults(func=cmd_sweep)
 
@@ -537,13 +547,33 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _confirm_sweep_discard(path: Path, branch: str, changes: str) -> bool:
+    print(f"\nUncommitted files in {path} ({branch}):", file=sys.stderr)
+    print(changes, end="", file=sys.stderr)
+    print(
+        "Discard ALL tracked changes and delete untracked files, then release? "
+        "Ignored files are kept. [y/N] ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        return sys.stdin.readline().strip().lower() in {"y", "yes"}
+    except EOFError:
+        return False
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch)
+    results = _pool().sweep(
+        fetch=args.fetch,
+        older_than=args.older_than,
+        confirm_discard=_confirm_sweep_discard if args.interactive else None,
+    )
     folded = 0
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
-            print(f"{item.action}: {item.name} ({item.branch})")
+            print(f"{item.action}: {item.name} ({item.branch}): {item.reason}")
         elif item.action == "skipped":
             note(f"skipped {item.name} ({item.branch}): {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
