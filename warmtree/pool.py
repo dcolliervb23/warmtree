@@ -331,7 +331,12 @@ class Pool:
             return slot, cold
 
     def release(
-        self, branch: str, keep_branch: bool = False, force: bool = False
+        self,
+        branch: str,
+        keep_branch: bool = False,
+        force: bool = False,
+        *,
+        confirm_discard: Callable[[Path, str, str], bool] | None = None,
     ) -> tuple[Slot, bool]:
         """Return the slot holding `branch` to the pool.
 
@@ -366,10 +371,14 @@ class Pool:
                     "wait for it to exit, or use --force"
                 )
             if not force and git.is_dirty(path):
-                raise PoolError(
-                    f"{slot.name} has uncommitted changes; commit or stash them, "
-                    "or use --force to discard them"
-                )
+                if confirm_discard is None:
+                    raise PoolError(
+                        f"{slot.name} has uncommitted changes; commit or stash them, "
+                        "or use --force to discard them"
+                    )
+                changes = git.uncommitted_files(path)
+                if not confirm_discard(path, branch, changes):
+                    raise PoolError("uncommitted changes kept; discard declined")
             git.reset_to_detached(path, self.base())
             branch_deleted = False
             if not keep_branch:
@@ -441,7 +450,12 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def sweep(self, fetch: bool = False) -> list["Swept"]:
+    def sweep(
+        self,
+        fetch: bool = False,
+        *,
+        confirm_discard: Callable[[Path, str, str], bool] | None = None,
+    ) -> list["Swept"]:
         """Fold finished work back into the pool.
 
         Two passes with one test: a branch git certifies as merged into
@@ -449,8 +463,11 @@ class Pool:
         worktrees on merged branches are adopted and released in one
         motion, so their folders and dependencies join the pool. Dirty
         trees, unmerged branches, slots other live sessions hold, and
-        anything that is not ours are skipped with a reason. Squash-merged
-        branches are not detected: their commits are not ancestors of base.
+        anything that is not ours are skipped with a reason. Squash merges
+        are detected by matching the full branch patch to a base commit;
+        those slots are released with the local branch preserved.
+        confirm_discard can approve discarding dirty files, but never
+        overrides a live session's lease. Without it, dirty trees are skipped.
         """
         if fetch:
             git.fetch(self.repo_root)
@@ -460,19 +477,42 @@ class Pool:
             base_ref = remote_ref
         results: list[Swept] = []
 
-        def merged(branch: str) -> bool:
-            return git.is_ancestor(self.repo_root, branch, base_ref)
+        history: dict[str, set[str]] = {}
+        approved: dict[Path, str] = {}
+
+        def confirm(path: Path, branch: str, changes: str) -> bool:
+            # Hand-made worktrees ask before adoption; release checks again
+            # under its lock. Reuse approval only for the same file list.
+            if approved.get(path) == changes:
+                return True
+            if confirm_discard is not None and confirm_discard(path, branch, changes):
+                approved[path] = changes
+                return True
+            return False
+
+        def merged(branch: str) -> str | None:
+            if git.is_ancestor(self.repo_root, branch, base_ref):
+                return "merged"
+            if git.is_squash_merged(self.repo_root, branch, base_ref, history):
+                return "squash merged; branch kept"
+            return None
 
         for slot in self.status():
             if slot.state != "taken" or slot.branch is None:
                 continue
-            if not merged(slot.branch):
+            reason = merged(slot.branch)
+            if not reason:
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
                 continue
             try:
-                self.release(slot.branch)
-                self._certified_delete(slot.branch)
-                results.append(Swept(slot.name, slot.branch, "released", "merged"))
+                self.release(
+                    slot.branch,
+                    keep_branch=reason != "merged",
+                    confirm_discard=confirm if confirm_discard else None,
+                )
+                if reason == "merged":
+                    self._certified_delete(slot.branch)
+                results.append(Swept(slot.name, slot.branch, "released", reason))
             except PoolError as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
 
@@ -488,17 +528,25 @@ class Pool:
             if branch is None:
                 results.append(Swept(label, None, "kept", "detached HEAD"))
                 continue
-            if not merged(branch):
+            reason = merged(branch)
+            if not reason:
                 results.append(Swept(label, branch, "kept", "not merged"))
                 continue
-            if git.is_dirty(path):
+            if git.is_dirty(path) and not confirm(
+                path, branch, git.uncommitted_files(path)
+            ):
                 results.append(Swept(label, branch, "skipped", "uncommitted changes"))
                 continue
             try:
                 self.adopt(path)
-                self.release(branch)
-                self._certified_delete(branch)
-                results.append(Swept(label, branch, "folded", "merged"))
+                self.release(
+                    branch,
+                    keep_branch=reason != "merged",
+                    confirm_discard=confirm if confirm_discard else None,
+                )
+                if reason == "merged":
+                    self._certified_delete(branch)
+                results.append(Swept(label, branch, "folded", reason))
             except (PoolError, git.GitError) as exc:
                 results.append(Swept(label, branch, "skipped", str(exc)))
         return results

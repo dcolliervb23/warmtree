@@ -48,7 +48,7 @@ def allow_hooks(allowed: bool) -> None:
     _hooks_allowed = allowed
 
 
-def run(args: list[str], cwd: Path) -> str:
+def run(args: list[str], cwd: Path, *, strip: bool = True) -> str:
     """Run `git <args>` in cwd and return stripped stdout."""
     prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_no_hooks_path()}"]
     result = subprocess.run(
@@ -64,7 +64,7 @@ def run(args: list[str], cwd: Path) -> str:
         if not message:
             message = f"git {' '.join(args)} exited with code {result.returncode}"
         raise GitError(message)
-    return result.stdout.strip()
+    return result.stdout.strip() if strip else result.stdout
 
 
 def repo_root(start: Path) -> Path:
@@ -164,6 +164,71 @@ def is_ancestor(repo: Path, ref: str, of: str) -> bool:
     except GitError:
         return False
     return True
+
+
+def patch_ids(repo: Path, patch: str) -> set[str]:
+    """Fingerprint patches without ignoring whitespace (unlike git cherry)."""
+    # Log inserts empty separators between commits. --verbatim counts those,
+    # so remove only truly empty lines (blank diff lines carry a prefix).
+    patch = "\n".join(line for line in patch.splitlines() if line) + "\n"
+    result = subprocess.run(
+        ["git", "patch-id", "--verbatim"],
+        cwd=repo,
+        input=patch,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode:
+        raise GitError(result.stderr.strip())
+    return {line.split()[0] for line in result.stdout.splitlines()}
+
+
+def is_squash_merged(
+    repo: Path, branch: str, base: str, history: dict[str, set[str]]
+) -> bool:
+    """Match the branch's entire net patch to one commit on base.
+
+    Cache base history by fork point for a sweep. An empty patch is not
+    evidence of a squash merge. No refs, index, or worktree are changed.
+    """
+    try:
+        fork = run(["merge-base", branch, base], cwd=repo)
+        options = ["--no-ext-diff", "--no-textconv", "--binary", "--no-renames"]
+        patch = run(["diff", *options, fork, branch], cwd=repo, strip=False)
+        ids = patch_ids(repo, patch)
+        if not ids:
+            return False
+        if fork not in history:
+            history[fork] = patch_ids(
+                repo,
+                run(
+                    [
+                        "log",
+                        "--no-merges",
+                        "--format=commit %H",
+                        "-p",
+                        *options,
+                        f"{fork}..{base}",
+                    ],
+                    cwd=repo,
+                    strip=False,
+                ),
+            )
+        return ids <= history[fork]
+    except GitError:
+        # Missing history or an older git without --verbatim is not proof.
+        return False
+
+
+def uncommitted_files(path: Path) -> str:
+    """Porcelain status with every untracked file, preserving status columns."""
+    return run(
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=path,
+        strip=False,
+    )
 
 
 def is_dirty(path: Path) -> bool:
