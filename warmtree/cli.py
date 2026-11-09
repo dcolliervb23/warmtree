@@ -214,6 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="list uncommitted files and ask before discarding and releasing",
     )
+    sweep.add_argument(
+        "--older-than",
+        help="release old clean slots, keeping unmerged branches (e.g. 7d)",
+    )
     sweep.set_defaults(func=cmd_sweep)
 
     exec_cmd = commands.add_parser(
@@ -562,6 +566,7 @@ def _confirm_sweep_discard(path: Path, branch: str, changes: str) -> bool:
 def cmd_sweep(args: argparse.Namespace) -> int:
     results = _pool().sweep(
         fetch=args.fetch,
+        older_than=args.older_than,
         confirm_discard=_confirm_sweep_discard if args.interactive else None,
     )
     folded = 0

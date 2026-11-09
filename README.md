@@ -393,3 +393,17 @@ those changes and release it. Only `y` or `yes` approves; Enter, any other answe
 or end of input skips that worktree. Ignored files such as installed dependencies
 are kept. Unmerged branches and slots held by another live session remain skipped.
 Without `--interactive`, dirty worktrees are skipped as before.
+
+
+### Optional slot limit and aging
+
+Set `[pool] max_slots = 10` to cap the total number of managed slots,
+including taken and warming slots. Filling stops at the cap; a cold take or
+adoption at the cap fails. Existing slots are not removed if the cap is lowered.
+Omit the setting for the default unlimited behavior.
+
+`warmtree sweep --older-than 7d` also releases taken slots whose lease began
+at least seven days ago, even when their branches are unmerged. Unmerged
+branches are retained. Dirty worktrees and slots held by another live session
+are still skipped. Slots without a recorded lease time are not aged out.
+Intervals use `m`, `h`, or `d`.

@@ -368,3 +368,17 @@ def test_interactive_sweep_prompts_separately_for_each_slot(repo: Path):
     paths = {slot.branch: Path(slot.path) for slot in (first, second)}
     assert (paths[calls[0]] / "temporary.txt").exists()
     assert not (paths[calls[1]] / "temporary.txt").exists()
+
+
+def test_sweep_old_unmerged_preserves_branch(repo: Path):
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
+    slot, _ = pool.take("old-work")
+    path = Path(slot.path)
+    (path / "work.txt").write_text("work")
+    run_git("add", ".", cwd=path)
+    run_git("commit", "-q", "-m", "work", cwd=path)
+    pool._update_slot(slot.name, lease_since="2000-01-01T00:00:00+00:00")
+    assert pool.sweep()[0].action == "kept"
+    assert pool.sweep(older_than="7d")[0].action == "released"
+    assert git.branch_exists(repo, "old-work")

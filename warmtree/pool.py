@@ -184,6 +184,11 @@ class Pool:
                 slots = self.load_state()
                 if _waiting(slots) >= self.config.size:
                     return created
+                if (
+                    self.config.max_slots is not None
+                    and len(slots) >= self.config.max_slots
+                ):
+                    return created
                 name = _next_name(slots)
                 path = self.dir / name
                 git.worktree_add_detached(self.repo_root, path, self.base())
@@ -302,6 +307,11 @@ class Pool:
                 _checkout(self.repo_root, Path(slot.path), branch, from_ref, self.log)
                 cold = False
             else:
+                if (
+                    self.config.max_slots is not None
+                    and len(slots) >= self.config.max_slots
+                ):
+                    raise PoolError("pool has reached max_slots")
                 name = _next_name(slots)
                 path = self.dir / name
                 if (
@@ -434,6 +444,11 @@ class Pool:
                 raise PoolError(
                     f"{source} has a detached HEAD; check out a branch first"
                 )
+            if (
+                self.config.max_slots is not None
+                and len(slots) >= self.config.max_slots
+            ):
+                raise PoolError("pool has reached max_slots")
             name = _next_name(slots)
             slot = Slot(
                 name=name,
@@ -453,6 +468,7 @@ class Pool:
     def sweep(
         self,
         fetch: bool = False,
+        older_than: str | None = None,
         *,
         confirm_discard: Callable[[Path, str, str], bool] | None = None,
     ) -> list["Swept"]:
@@ -476,6 +492,8 @@ class Pool:
         if git.ref_exists(self.repo_root, remote_ref):
             base_ref = remote_ref
         results: list[Swept] = []
+        window = config_interval(older_than, "older_than") if older_than else 0
+        cutoff = datetime.now(UTC).timestamp() - window
 
         history: dict[str, set[str]] = {}
         approved: dict[Path, str] = {}
@@ -501,6 +519,18 @@ class Pool:
             if slot.state != "taken" or slot.branch is None:
                 continue
             reason = merged(slot.branch)
+            old = bool(
+                window
+                and slot.lease_since
+                and datetime.fromisoformat(slot.lease_since).timestamp() <= cutoff
+            )
+            if not reason and old:
+                try:
+                    self.release(slot.branch, keep_branch=True)
+                    results.append(Swept(slot.name, slot.branch, "released", "expired"))
+                except PoolError as exc:
+                    results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
+                continue
             if not reason:
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
                 continue
