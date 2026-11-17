@@ -50,7 +50,14 @@ def copy_files(
             continue
         target = slot_path / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
+        # A symlink at the target would make copyfile write through it, or fail
+        # when it points back at the source. Replace it with a real copy.
+        if target.is_symlink():
+            target.unlink()
+        try:
+            shutil.copyfile(source, target)
+        except OSError as error:
+            raise WarmError(f"could not copy {name} into the slot: {error}") from error
         if env and is_env_file(name):
             set_slot_variable(target, slot_number)
         copied.append(name)

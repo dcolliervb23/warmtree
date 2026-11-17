@@ -598,7 +598,9 @@ class Pool:
 
         Each slot is moved to the current base commit and its copied files
         are refreshed. The run commands only execute again when a lockfile
-        hash changed or the slot's last warm failed.
+        hash changed or the slot's last warm failed. A slot that fails to
+        warm is marked stale and the others are still refreshed; the failures
+        are raised together as one WarmError at the end.
 
         With fetch=True the remote is fetched first and slots park on
         `origin/<base>` where it exists, so they track the remote even when
@@ -621,6 +623,7 @@ class Pool:
             candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
 
         results = []
+        failures = []
         for name in candidates:
             with self.locked():
                 slots = self.load_state()
@@ -639,8 +642,19 @@ class Pool:
                 warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
             )
             rewarm = was_stale or lockfiles_changed
-            slot = self._warm(slot, run=rewarm)
+            # One slot that fails to warm must not keep the rest of the
+            # pool on an old base. _warm has marked it stale, so the next
+            # refresh tries it again.
+            try:
+                slot = self._warm(slot, run=rewarm)
+            except warm.WarmError as error:
+                failures.append(f"{name}: {error}")
+                continue
             results.append(Refreshed(slot, moved, rewarm))
+        if failures:
+            # Raised before the stamp is touched: a refresh that left slots
+            # stale is not recorded as finished.
+            raise warm.WarmError("refresh left slots stale: " + "; ".join(failures))
         if fetch or results:
             # A no-op pass over an empty pool must not mark it fresh, or
             # slots created just after would sit stale for a full interval.
