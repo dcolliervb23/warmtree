@@ -24,7 +24,9 @@ Append here instead of expanding DESIGN.md.
   a fan-out; relative syntax removes the round trip.
 - **Autogrow on cold take, with a cap.** A config like `autogrow = 2` bumping
   size whenever take falls back cold only ever ratchets up, each step costing
-  a full node_modules on disk. Needs `max_size`, and shrinking back toward
+  a full node_modules on disk. Needs `max_slots` (PR #23's name for the cap
+  on total managed slots — better than `max_size`, which reads as a cap on
+  the `size` setting), and shrinking back toward
   the configured size edges into daemon territory. Cold fallback plus the
   skill telling agents to grow before fanning out covers most of it today.
 - **Reflink spike results (2026-09-13, spike/reflink branch).** Measured on
