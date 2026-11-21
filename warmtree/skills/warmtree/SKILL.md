@@ -57,8 +57,8 @@ Decide with this rule:
   the pool and warms the new slots before returning, which takes as long as
   the project's install command. Or take anyway and accept a cold create for
   the shortfall; that works, it is only slow.
-- Do not shrink the pool unless the user asks. Shrinking removes ready slots
-  and their installed dependencies.
+- Do not shrink the pool unless the user asks. Shrinking removes waiting (ready or stale)
+  slots and their installed dependencies.
 
 For scripts, `warmtree status --json` returns a list of slots with `name`,
 `path`, `state`, `branch`, `created`, `warmed`, `lockfiles`, `lease_pid`
@@ -98,7 +98,9 @@ local and origin tips differ, a note on stderr says so; reconcile before
 pushing.
 Options:
 
-- `--from <ref>`: start the new branch somewhere other than base.
+- `--from <ref>`: start the new branch somewhere other than base. It
+  wins over origin: a branch that exists only on origin is created fresh at
+  `<ref>` and tracks nothing, so leave `--from` off to pick up a remote branch.
 - `--scratch` (instead of a branch name): a generated `scratch/<id>` branch
   for throwaway experiments. The branch name is printed on stderr; release
   it like any other branch when done.
@@ -150,7 +152,8 @@ marks it ready. Run this after the branch is merged, or when the work is
 abandoned.
 
 - It refuses a dirty tree. Commit or stash first. Ask the user before using
-  `--force`, which discards uncommitted changes.
+  `--force`, which discards uncommitted changes and also takes the slot
+  from another still-running session that holds it.
 - It deletes the branch only if it is merged. An unmerged branch is always
   kept, and `--keep-branch` keeps it regardless.
 
@@ -177,7 +180,7 @@ abandoned.
 | `warmtree path <branch>` | Print the taken slot's absolute path for a branch. |
 | `warmtree size` | Configured size and counts. `warmtree size N` grows or shrinks to N. |
 | `warmtree status [--json] [--du]` | Every slot and its state; `--du` adds disk usage. |
-| `warmtree take <branch> [--from REF] [--json] [--refill-background]` | Claim a slot, print its path (or JSON). |
+| `warmtree take <branch> [--from REF] [--json] [--refill-background \| --no-refill]` | Claim a slot, print its path (or JSON). |
 | `warmtree take --scratch` | Claim a slot on a generated throwaway branch. |
 | `warmtree exec <branch> -- <command...>` | Run one command inside that branch's slot. |
 | `warmtree release <branch> [--keep-branch] [--force] [--json]` | Return a slot. |

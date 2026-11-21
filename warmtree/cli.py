@@ -176,8 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     fill = commands.add_parser(
         "fill",
-        help="create and warm slots until size are ready",
-        description="Create slots until [pool] size are ready. Each is a "
+        help="create and warm slots until size are waiting",
+        description="Create slots until [pool] size are waiting (ready, "
+        "warming, or stale; taken slots do not count). Each is a "
         "worktree on a detached HEAD at base, with [warm] copy files copied "
         "in and [warm] run commands executed. Warns when run is empty but "
         "the repo has a lockfile warmtree recognizes.",
@@ -188,8 +189,10 @@ def build_parser() -> argparse.ArgumentParser:
         "take",
         help="claim a ready slot for a branch",
         description="Claim the most recently used ready slot and check out "
-        "BRANCH in it: the local branch if it exists, else origin's (created "
-        "to track it), else a new branch from --from or base. Prints only the "
+        "BRANCH in it: the local branch if it exists; else, without --from, "
+        "origin's (created to track it); else a new branch from --from or base. "
+        "--from wins over origin: the new branch starts at REF and tracks "
+        "nothing. Prints only the "
         "slot's path on stdout; notes go to stderr. With no ready slot it "
         "falls back to a normal git worktree add and says so. Taking a branch "
         "that is already in a taken slot prints that slot's path again. "
@@ -211,7 +214,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="from_ref",
         metavar="REF",
         help="start a new branch at REF instead of base; ignored when the "
-        "branch already exists locally",
+        "branch already exists locally, and used instead of origin's branch "
+        "of the same name",
     )
     take.add_argument(
         "--json",
