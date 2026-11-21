@@ -203,9 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
         "worktrees parked on a detached HEAD whose commit is an ancestor "
         "of base are removed, unless they are locked, mid-operation, hold "
         "commits or nested repositories only they have, hold ignored files "
-        "that are not dependency or build folders, or moved in the last 14 days.",
-        epilog="onboarding a repo with a pile of old worktrees: "
-        "warmtree init, then warmtree sweep --fetch",
+        "that are not dependency or build folders, or moved in the last 14 days. "
+        "With --dry-run nothing changes: sweep lists what it would clean up, "
+        "what needs you, and what is still in flight.",
+        epilog="onboarding a repo with a pile of old worktrees: warmtree init, "
+        "then warmtree sweep --fetch --dry-run to see the plan, then "
+        "warmtree sweep --fetch",
     )
     sweep.add_argument(
         "--fetch",

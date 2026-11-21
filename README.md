@@ -108,16 +108,20 @@ of being deleted.
 Branches without a checkout need no onboarding: they are just refs, and
 `warmtree take <branch>` is how they get a workspace from now on. And for
 the pile of worktrees whose branches merged long ago, one command folds
-them all in:
+them all in. Look first, then sweep:
 
 ```sh
+warmtree sweep --fetch --dry-run   # what it would do, and what needs you
 warmtree sweep --fetch
 ```
 
 Every worktree (and taken slot) on a branch git certifies as merged is
 released into the pool — folder, dependencies and all — where it serves as
 a warm slot or quietly shrinks away later. Dirty trees and unmerged
-branches are left exactly where they are.
+branches are left exactly where they are, and the dry run lists them under
+"needs you" or "still in flight" so you know what is yours to settle.
+Detached checkouts of merged PRs are left too; `--detached` removes the
+ones that hold no work of their own.
 
 ## Commands
 
