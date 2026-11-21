@@ -135,7 +135,7 @@ branches are left exactly where they are.
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. Refuses a slot leased to another still-running session (the one that ran `take` or `adopt`); `--force` overrides. `--json` prints `slot`, `branch`, `branch_deleted`. |
 | `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. Does not pin the slot: do not release a branch while a command still runs in it. |
 | `warmtree adopt <path>` | Register an existing worktree as a taken slot, in place; nothing on disk changes. At `release` the folder moves into the pool and its dependencies are recycled. |
-| `warmtree sweep [--fetch]` | Fold finished work into the pool: release taken slots whose branch is merged, and adopt-then-release hand-made worktrees whose branch is merged. Skips dirty trees, unmerged branches, and slots other sessions hold. `--fetch` first, so branches merged only upstream count. Squash-merged branches are not detected. |
+| `warmtree sweep [--fetch] [-i]` | Fold finished work into the pool: release taken slots whose branch is merged, and adopt-then-release hand-made worktrees whose branch is merged. Skips dirty trees, unmerged branches, and slots other sessions hold. `--fetch` first, so branches merged only upstream count. Squash merges are detected when the full branch patch matches a single base commit; these slots are released with their local branches kept. Conflict resolutions or later branch edits can prevent a match. |
 | `warmtree refresh [--fetch]` | Move every waiting slot to the current base commit and re-copy files. `--fetch` fetches first and parks slots on `origin/<base>`, so they track the remote even when your local base branch is behind; your own checkout is never touched. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
@@ -383,3 +383,27 @@ The workflow refuses to publish if the tag and the package version disagree.
 ## License
 
 MIT
+
+### Interactive sweep
+
+Run `warmtree sweep --fetch --interactive` (or `-i`) to review dirty worktrees
+whose branches have merged. Before releasing each dirty worktree, sweep lists
+all modified, staged, deleted, and untracked files and asks whether to discard
+those changes and release it. Only `y` or `yes` approves; Enter, any other answer,
+or end of input skips that worktree. Ignored files such as installed dependencies
+are kept. Unmerged branches and slots held by another live session remain skipped.
+Without `--interactive`, dirty worktrees are skipped as before.
+
+
+### Optional slot limit and aging
+
+Set `[pool] max_slots = 10` to cap the total number of managed slots,
+including taken and warming slots. Filling stops at the cap; a cold take or
+adoption at the cap fails. Existing slots are not removed if the cap is lowered.
+Omit the setting for the default unlimited behavior.
+
+`warmtree sweep --older-than 7d` also releases taken slots whose lease began
+at least seven days ago, even when their branches are unmerged. Unmerged
+branches are retained. Dirty worktrees and slots held by another live session
+are still skipped. Slots without a recorded lease time are not aged out.
+Intervals use `m`, `h`, or `d`.

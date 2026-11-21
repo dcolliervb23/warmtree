@@ -77,3 +77,16 @@ def test_explicit_base_is_respected(repo: Path):
 
 def test_status_on_empty_pool_is_empty(repo: Path):
     assert Pool(repo, Config()).status() == []
+
+
+def test_max_slots_caps_fill_and_cold_take(repo: Path):
+    import pytest
+    from warmtree.pool import PoolError
+
+    pool = Pool(repo, Config(size=3, max_slots=1))
+    assert len(pool.fill()) == 1
+    pool.take("first")
+    assert pool.fill() == []
+    with pytest.raises(PoolError, match="max_slots"):
+        pool.take("second")
+    assert len(pool.status()) == 1

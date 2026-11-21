@@ -198,8 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
         "and adopt-then-release hand-made worktrees whose branch is merged, "
         "folding their folders and dependencies into the pool. Dirty trees, "
         "unmerged branches, and slots other sessions hold are skipped with "
-        "a reason. Squash-merged branches are not detected: their commits "
-        "are not ancestors of base.",
+        "a reason. Squash merges are detected when the full branch patch "
+        "matches a base commit; their local branches are kept.",
         epilog="onboarding a repo with a pile of old worktrees: "
         "warmtree init, then warmtree sweep --fetch",
     )
@@ -207,6 +207,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch",
         action="store_true",
         help="fetch origin first, so branches merged only upstream count",
+    )
+    sweep.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="list uncommitted files and ask before discarding and releasing",
+    )
+    sweep.add_argument(
+        "--older-than",
+        help="release old clean slots, keeping unmerged branches (e.g. 7d)",
     )
     sweep.set_defaults(func=cmd_sweep)
 
@@ -496,7 +506,7 @@ def cmd_take(args: argparse.Namespace) -> int:
         print(slot.path)
 
     if args.refill_background:
-        _spawn_background(pool.repo_root, "fill")
+        _spawn_background(pool, "fill")
         note("refilling in the background")
     elif not args.no_refill:
         for created in pool.fill():
@@ -537,13 +547,33 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _confirm_sweep_discard(path: Path, branch: str, changes: str) -> bool:
+    print(f"\nUncommitted files in {path} ({branch}):", file=sys.stderr)
+    print(changes, end="", file=sys.stderr)
+    print(
+        "Discard ALL tracked changes and delete untracked files, then release? "
+        "Ignored files are kept. [y/N] ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        return sys.stdin.readline().strip().lower() in {"y", "yes"}
+    except EOFError:
+        return False
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch)
+    results = _pool().sweep(
+        fetch=args.fetch,
+        older_than=args.older_than,
+        confirm_discard=_confirm_sweep_discard if args.interactive else None,
+    )
     folded = 0
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
-            print(f"{item.action}: {item.name} ({item.branch})")
+            print(f"{item.action}: {item.name} ({item.branch}): {item.reason}")
         elif item.action == "skipped":
             note(f"skipped {item.name} ({item.branch}): {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
@@ -770,7 +800,7 @@ def _maybe_auto_refresh(pool: Pool) -> None:
             before = None  # never refreshed: overdue by definition
         stamp.touch()
     try:
-        _spawn_background(pool.repo_root, "refresh", "--fetch")
+        _spawn_background(pool, "refresh", "--fetch")
     except OSError:
         # Give the duty back rather than suppressing retries for a
         # whole interval.
@@ -787,14 +817,31 @@ def _pool() -> Pool:
     return Pool(root, config.load(root), log=note)
 
 
-def _spawn_background(repo_root: Path, *args: str) -> None:
-    """Start a warmtree command detached from this process and terminal."""
+BACKGROUND_LOG = "background.log"
+BACKGROUND_LOG_LIMIT = 1_000_000  # bytes; start the log over past this
+
+
+def _spawn_background(pool: Pool, *args: str) -> None:
+    """Start a warmtree command detached from this process and terminal.
+
+    Its output is appended to background.log in the pool dir, so a refresh
+    or fill that fails with no one watching still leaves a reason behind.
+    """
     command = [sys.executable, "-m", "warmtree", *args]
+    pool.dir.mkdir(parents=True, exist_ok=True)
+    log_path = pool.dir / BACKGROUND_LOG
+    mode = "a"
+    if log_path.exists() and log_path.stat().st_size > BACKGROUND_LOG_LIMIT:
+        mode = "w"
+    log = open(log_path, mode, encoding="utf-8")
+    started = datetime.now(UTC).isoformat(timespec="seconds")
+    log.write(f"--- {started} warmtree {' '.join(args)}\n")
+    log.flush()
     options: dict = {
-        "cwd": repo_root,
+        "cwd": pool.repo_root,
         "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
+        "stdout": log,
+        "stderr": subprocess.STDOUT,
     }
     if sys.platform == "win32":
         options["creationflags"] = (
@@ -802,7 +849,10 @@ def _spawn_background(repo_root: Path, *args: str) -> None:
         )
     else:
         options["start_new_session"] = True
-    subprocess.Popen(command, **options)
+    try:
+        subprocess.Popen(command, **options)
+    finally:
+        log.close()  # the child keeps its own handle
 
 
 def _age(timestamp: str) -> str:

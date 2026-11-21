@@ -20,6 +20,7 @@ class ConfigError(Exception):
 @dataclass(frozen=True)
 class Config:
     size: int = 2
+    max_slots: int | None = None  # None means unlimited
     base: str | None = None  # None means "detect the repo's default branch"
     dir: str | None = None  # None means "../.warmtree/<repo name>"
     lockfiles: tuple[str, ...] = ()
@@ -44,6 +45,7 @@ class Config:
 _SCHEMA: dict[str, dict[str, type]] = {
     "pool": {
         "size": int,
+        "max_slots": int,
         "base": str,
         "dir": str,
         "lockfiles": list,
@@ -75,6 +77,8 @@ def parse(text: str) -> Config:
     size = values.get("size", Config.size)
     if isinstance(size, int) and size < 0:
         raise ConfigError("[pool] size must be zero or more")
+    if "max_slots" in values and values["max_slots"] < 0:
+        raise ConfigError("[pool] max_slots must be zero or more")
     for key in ("refresh_every", "shrink_after"):
         value = values.get(key, getattr(Config, key))
         if isinstance(value, str):
@@ -165,6 +169,7 @@ def starter_toml(lockfiles: list[str]) -> str:
 
 [pool]
 size = 2                     # slots to keep ready
+# max_slots = 10             # optional cap on total managed slots
 # base = "main"              # branch slots park on; default: repo default branch
 # dir = "../.warmtree/app"   # where slots live; default is ../.warmtree/<repo name>
 lockfiles = {lockfiles_toml}  # re-warm a slot only when one of these changes
