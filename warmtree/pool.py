@@ -747,6 +747,9 @@ class Pool:
                 slot = _find(slots, name)
                 if slot.state not in REFRESHABLE:
                     continue  # taken since we looked
+                if self._leave_alone(slot):
+                    self.save_state(slots)
+                    continue
                 was_stale = slot.state == "stale"
                 slot.state = "warming"
                 self.save_state(slots)
@@ -785,11 +788,18 @@ class Pool:
         cutoff = datetime.now(UTC).timestamp() - window
         with self.locked():
             slots = self.load_state()
-            all_ready = [slot for slot in slots if slot.state == "ready"]
-            removable = [slot for slot in all_ready if self._at_home(slot)]
+            if sum(slot.state == "ready" for slot in slots) <= self.config.size:
+                return
+            kept = self._leave_alone_all(slots)
             # The floor guards READY slots specifically: warming and stale
             # slots may never make it back, so they earn no credit toward
             # size, or trimming could leave fewer ready than configured.
+            all_ready = [
+                slot
+                for slot in slots
+                if slot.state == "ready" and slot.name not in kept
+            ]
+            removable = [slot for slot in all_ready if self._at_home(slot)]
             surplus = len(all_ready) - self.config.size
             if surplus <= 0:
                 return
@@ -815,6 +825,54 @@ class Pool:
                     f"pool heading back to {self.config.size} ready"
                 )
 
+    def _leave_alone(self, slot: Slot) -> bool:
+        """Whether a waiting slot holds something a reset or delete would lose.
+
+        Two cases, both seen in ordinary use. A branch checked out by hand
+        in a parked slot means someone is working there: the slot is marked
+        taken on that branch, as `take` does, so release can recycle it
+        later. A folder that is no longer our worktree belongs to someone
+        else, and git run inside it can act on whatever repository contains
+        it: it is left as it is for doctor to report. A missing folder has
+        nothing to lose. The caller holds the lock and saves state.
+        """
+        path = Path(slot.path)
+        if not path.is_dir():
+            return False
+        if not git.owns_worktree(self.repo_root, path):
+            self.log(
+                f"{slot.name} is not a working tree of this repository; "
+                "left alone (see warmtree doctor)"
+            )
+            return True
+        head = git.head_branch(path)
+        if head is None:
+            return False
+        slot.state = "taken"
+        slot.branch = head
+        self.log(
+            f"{slot.name} was marked ready but has {head} checked out; "
+            "marked taken instead"
+        )
+        return True
+
+    def _leave_alone_all(self, slots: list[Slot]) -> set[str]:
+        """Check every waiting slot, save what changed, name the ones kept.
+
+        A slot just marked taken is no longer waiting, so it is not named.
+        """
+        kept = set()
+        changed = False
+        for slot in slots:
+            if slot.state in REFRESHABLE and self._leave_alone(slot):
+                if slot.state == "taken":
+                    changed = True
+                else:
+                    kept.add(slot.name)
+        if changed:
+            self.save_state(slots)
+        return kept
+
     def _at_home(self, slot: Slot) -> bool:
         """Whether the slot's folder lives in the pool directory."""
         return Path(slot.path).resolve() == (self.dir / slot.name).resolve()
@@ -829,12 +887,15 @@ class Pool:
         """
         with self.locked():
             slots = self.load_state()
-            surplus = _waiting(slots) - self.config.size
+            kept = self._leave_alone_all(slots)
+            surplus = _waiting(slots) - len(kept) - self.config.size
             candidates = sorted(
                 (
                     slot
                     for slot in slots
-                    if slot.state in REFRESHABLE and self._at_home(slot)
+                    if slot.state in REFRESHABLE
+                    and slot.name not in kept
+                    and self._at_home(slot)
                 ),
                 key=lambda slot: slot.number,
                 reverse=True,
