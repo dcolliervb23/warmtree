@@ -215,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also remove clean detached worktrees whose commit is merged into base",
     )
+    sweep.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="change nothing; list what sweep would clean up, what needs you, "
+        "and what is still in flight",
+    )
     sweep.set_defaults(func=cmd_sweep)
 
     exec_cmd = commands.add_parser(
@@ -544,8 +550,44 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+SWEEP_GROUPS = (
+    ("clean", "would clean up:"),
+    ("needs-you", "needs you:"),
+    ("with-detached", "removable with --detached:"),
+    ("in-flight", "still in flight:"),
+)
+SWEEP_VERBS = {"released": "release", "folded": "fold", "removed": "remove"}
+
+
+def print_sweep_plan(results: list) -> None:
+    for group, heading in SWEEP_GROUPS:
+        items = [item for item in results if item.group == group]
+        if not items:
+            continue
+        print(heading)
+        for item in items:
+            held = item.branch if item.branch is not None else "detached"
+            if group == "clean":
+                print(f"  {SWEEP_VERBS[item.action]} {item.name} ({held})")
+            else:
+                print(f"  {item.name} ({held}): {item.reason}")
+        if group == "in-flight" and any(i.reason == "not merged" for i in items):
+            print(
+                "  (squash-merged branches look unmerged to git and show here; "
+                "release those yourself)"
+            )
+    if not results:
+        print("nothing to sweep")
+    print("dry run: nothing changed")
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch, detached=args.detached)
+    results = _pool().sweep(
+        fetch=args.fetch, detached=args.detached, dry_run=args.dry_run
+    )
+    if args.dry_run:
+        print_sweep_plan(results)
+        return 0
     folded = 0
     removed = 0
     for item in results:
@@ -566,6 +608,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     if removed:
         tally += f"; removed {removed}"
     print(f"{tally}; kept {kept} in flight; skipped {skipped}")
+    if kept or skipped:
+        note("to see what sweep left and why: warmtree sweep --dry-run")
     return 0
 
 
