@@ -203,9 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
         "worktrees parked on a detached HEAD whose commit is an ancestor "
         "of base are removed, unless they are locked, mid-operation, hold "
         "commits or nested repositories only they have, hold ignored files "
-        "that are not dependency or build folders, or moved in the last 14 days.",
-        epilog="onboarding a repo with a pile of old worktrees: "
-        "warmtree init, then warmtree sweep --fetch",
+        "that are not dependency or build folders, or moved in the last 14 days. "
+        "With --dry-run nothing changes: sweep lists what it would clean up, "
+        "what needs you, and what is still in flight.",
+        epilog="onboarding a repo with a pile of old worktrees: warmtree init, "
+        "then warmtree sweep --fetch --dry-run to see the plan, then "
+        "warmtree sweep --fetch",
     )
     sweep.add_argument(
         "--fetch",
@@ -217,6 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also remove idle, clean detached worktrees whose commit is merged "
         "into base and that hold no work of their own",
+    )
+    sweep.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="change nothing; list what sweep would clean up, what needs you, "
+        "and what is still in flight",
     )
     sweep.set_defaults(func=cmd_sweep)
 
@@ -547,8 +556,44 @@ def cmd_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+SWEEP_GROUPS = (
+    ("clean", "would clean up:"),
+    ("needs-you", "needs you:"),
+    ("with-detached", "removable with --detached:"),
+    ("in-flight", "still in flight:"),
+)
+SWEEP_VERBS = {"released": "release", "folded": "fold", "removed": "remove"}
+
+
+def print_sweep_plan(results: list) -> None:
+    for group, heading in SWEEP_GROUPS:
+        items = [item for item in results if item.group == group]
+        if not items:
+            continue
+        print(heading)
+        for item in items:
+            held = item.branch if item.branch is not None else "detached"
+            if group == "clean":
+                print(f"  {SWEEP_VERBS[item.action]} {item.name} ({held})")
+            else:
+                print(f"  {item.name} ({held}): {item.reason}")
+        if group == "in-flight" and any(i.reason == "not merged" for i in items):
+            print(
+                "  (squash-merged branches look unmerged to git and show here; "
+                "release those yourself)"
+            )
+    if not results:
+        print("nothing to sweep")
+    print("dry run: nothing changed")
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch, detached=args.detached)
+    results = _pool().sweep(
+        fetch=args.fetch, detached=args.detached, dry_run=args.dry_run
+    )
+    if args.dry_run:
+        print_sweep_plan(results)
+        return 0
     folded = 0
     removed = 0
     for item in results:
@@ -569,6 +614,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     if removed:
         tally += f"; removed {removed}"
     print(f"{tally}; kept {kept} in flight; skipped {skipped}")
+    if any(item.group in ("needs-you", "with-detached") for item in results):
+        note("to see what sweep left and why: warmtree sweep --dry-run")
     return 0
 
 

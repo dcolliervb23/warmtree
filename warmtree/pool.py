@@ -39,6 +39,9 @@ STATES = ("ready", "taken", "warming", "stale")
 # States refresh works on. Warming slots belong to another process.
 REFRESHABLE = ("ready", "stale")
 
+# The base branch is always merged into itself; sweep must never fold it.
+BASE_REASON = "is the base branch"
+
 # sweep --detached leaves a worktree alone if HEAD moved this recently.
 DETACHED_IDLE_DAYS = 14
 
@@ -180,6 +183,29 @@ class Swept:
     branch: str | None
     action: str  # released | folded | removed | kept | skipped
     reason: str
+
+    @property
+    def group(self) -> str:
+        """What this decision asks of the user.
+
+        clean: sweep does (or did) the cleanup. needs-you: sweep leaves it
+        because it holds work only the user can settle. with-detached: a
+        detached tree only `sweep --detached` removes. in-flight: normal
+        work in progress, nothing to do.
+        """
+        if self.action in ("released", "folded", "removed"):
+            return "clean"
+        if self.action == "skipped":
+            if " is held by process " in self.reason:
+                return "in-flight"
+            return "needs-you"
+        if "(sweep --detached removes it)" in self.reason:
+            return "with-detached"
+        if self.reason.startswith("detached HEAD, merged, but "):
+            if self.reason.endswith(f"within the last {DETACHED_IDLE_DAYS} days"):
+                return "in-flight"
+            return "needs-you"
+        return "in-flight"
 
 
 @dataclass
@@ -440,27 +466,9 @@ class Pool:
             slots = self.load_state()
             slot = _find_taken(slots, branch)
             path = Path(slot.path)
-            if not git.owns_worktree(self.repo_root, path):
-                raise PoolError(
-                    f"{slot.name} is no longer a working tree of this "
-                    "repository; run `warmtree doctor`"
-                )
-            if (
-                not force
-                and slot.lease_pid is not None
-                and slot.lease_pid != os.getppid()
-                and _pid_alive(slot.lease_pid)
-            ):
-                raise PoolError(
-                    f"{slot.name} is held by process {slot.lease_pid} "
-                    f"(since {slot.lease_since}); release from that session, "
-                    "wait for it to exit, or use --force"
-                )
-            if not force and git.is_dirty(path):
-                raise PoolError(
-                    f"{slot.name} has uncommitted changes; commit or stash them, "
-                    "or use --force to discard them"
-                )
+            refusal = self._release_refusal(slot, force)
+            if refusal is not None:
+                raise PoolError(refusal)
             git.reset_to_detached(path, self.base())
             branch_deleted = False
             if not keep_branch:
@@ -490,6 +498,36 @@ class Pool:
             slot.released = _now()
             self.save_state(slots)
             return slot, branch_deleted
+
+    def _release_refusal(self, slot: Slot, force: bool = False) -> str | None:
+        """Why release would refuse this taken slot, or None.
+
+        Shared by release and sweep's dry run, so a dry run predicts exactly
+        the refusals a real release raises.
+        """
+        path = Path(slot.path)
+        if not path.is_dir() or not git.owns_worktree(self.repo_root, path):
+            return (
+                f"{slot.name} is no longer a working tree of this "
+                "repository; run `warmtree doctor`"
+            )
+        if (
+            not force
+            and slot.lease_pid is not None
+            and slot.lease_pid != os.getppid()
+            and _pid_alive(slot.lease_pid)
+        ):
+            return (
+                f"{slot.name} is held by process {slot.lease_pid} "
+                f"(since {slot.lease_since}); release from that session, "
+                "wait for it to exit, or use --force"
+            )
+        if not force and git.is_dirty(path):
+            return (
+                f"{slot.name} has uncommitted changes; commit or stash them, "
+                "or use --force to discard them"
+            )
+        return None
 
     def adopt(self, path: Path) -> Slot:
         """Register an existing worktree as a taken slot, in place.
@@ -532,7 +570,9 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def sweep(self, fetch: bool = False, detached: bool = False) -> list["Swept"]:
+    def sweep(
+        self, fetch: bool = False, detached: bool = False, dry_run: bool = False
+    ) -> list["Swept"]:
         """Fold finished work back into the pool.
 
         Two passes with one test: a branch git certifies as merged into
@@ -545,6 +585,10 @@ class Pool:
         A hand-made worktree parked on a detached HEAD that is an ancestor
         of base is reported with a hint; with detached=True the clean ones
         are removed outright — there is no branch to lose.
+
+        With dry_run=True nothing in the pool or any worktree changes (fetch
+        still updates origin's refs); the results say what a real sweep
+        would do, from the same checks.
         """
         if fetch:
             git.fetch(self.repo_root)
@@ -553,24 +597,41 @@ class Pool:
         if git.ref_exists(self.repo_root, remote_ref):
             base_ref = remote_ref
         results: list[Swept] = []
+        base_branch = self.base()
 
         def merged(branch: str) -> bool:
             return git.is_ancestor(self.repo_root, branch, base_ref)
 
-        for slot in self.status():
+        def slots() -> list[Slot]:
+            # status() takes the pool lock, which creates the pool directory;
+            # with no state file there are no slots, and a dry run must not
+            # leave a directory behind.
+            return self.status() if self.state_path.exists() else []
+
+        for slot in slots():
             if slot.state != "taken" or slot.branch is None:
+                continue
+            if slot.branch == base_branch:
+                results.append(Swept(slot.name, slot.branch, "kept", BASE_REASON))
                 continue
             if not merged(slot.branch):
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
+                continue
+            if dry_run:
+                refusal = self._release_refusal(slot)
+                if refusal is None:
+                    results.append(Swept(slot.name, slot.branch, "released", "merged"))
+                else:
+                    results.append(Swept(slot.name, slot.branch, "skipped", refusal))
                 continue
             try:
                 self.release(slot.branch)
                 self._certified_delete(slot.branch)
                 results.append(Swept(slot.name, slot.branch, "released", "merged"))
-            except PoolError as exc:
+            except (PoolError, git.GitError) as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
 
-        known = {Path(s.path).resolve() for s in self.status()}
+        known = {Path(s.path).resolve() for s in slots()}
         known.add(self.repo_root.resolve())
         pool_root = self.dir.resolve()
         for path in git.worktree_list(self.repo_root):
@@ -608,6 +669,8 @@ class Pool:
                             "(sweep --detached removes it)",
                         )
                     )
+                elif dry_run:
+                    results.append(Swept(label, None, "removed", "detached, merged"))
                 else:
                     try:
                         git.worktree_remove(self.repo_root, path)
@@ -617,11 +680,17 @@ class Pool:
                     except git.GitError as exc:
                         results.append(Swept(label, None, "skipped", str(exc)))
                 continue
+            if branch == base_branch:
+                results.append(Swept(label, branch, "kept", BASE_REASON))
+                continue
             if not merged(branch):
                 results.append(Swept(label, branch, "kept", "not merged"))
                 continue
             if git.is_dirty(path):
                 results.append(Swept(label, branch, "skipped", "uncommitted changes"))
+                continue
+            if dry_run:
+                results.append(Swept(label, branch, "folded", "merged"))
                 continue
             try:
                 self.adopt(path)

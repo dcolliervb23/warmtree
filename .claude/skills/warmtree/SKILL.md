@@ -163,6 +163,8 @@ abandoned.
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
+| `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
+| `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 
 ## Quick reference
 
@@ -179,7 +181,7 @@ abandoned.
 | `warmtree fill` | Create and warm missing slots. |
 | `warmtree refresh` | Fast-forward waiting slots and re-warm if lockfiles changed. |
 | `warmtree adopt <path>` | Register an existing hand-made worktree as a taken slot, in place. |
-| `warmtree sweep [--fetch] [--detached]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. |
+| `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
 
 `adopt` changes nothing on disk: the worktree is registered where it is,
 and the folder moves into the pool later, at release, once the branch is
@@ -187,3 +189,14 @@ done. Only run it when the user asks you to onboard an existing worktree.
 `sweep` touches only branches git certifies as merged and skips dirty
 trees, but it does move the merged worktrees' folders into the pool; run
 it when the user asks for a cleanup, not on your own initiative.
+
+Start every cleanup with `warmtree sweep --dry-run` (add `--fetch` when the
+repo has a remote). It changes nothing and groups every worktree it looked
+at: "would clean up" is what a real sweep will do; "needs you" lists
+worktrees only the user can settle, such as uncommitted changes, commits no
+branch holds, an `.env`, or a paused bisect; "still in flight" is normal
+work. Show the user the "needs you" list and leave those trees alone: never
+discard work to make sweep take them. Squash-merged branches look unmerged
+to git and stay in flight; release them only once the user confirms they
+are merged. `--detached` deletes detached checkouts rather than folding
+them; add it only when the user asks to remove old detached checkouts.

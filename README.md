@@ -108,16 +108,20 @@ of being deleted.
 Branches without a checkout need no onboarding: they are just refs, and
 `warmtree take <branch>` is how they get a workspace from now on. And for
 the pile of worktrees whose branches merged long ago, one command folds
-them all in:
+them all in. Look first, then sweep:
 
 ```sh
+warmtree sweep --fetch --dry-run   # what it would do, and what needs you
 warmtree sweep --fetch
 ```
 
 Every worktree (and taken slot) on a branch git certifies as merged is
 released into the pool — folder, dependencies and all — where it serves as
 a warm slot or quietly shrinks away later. Dirty trees and unmerged
-branches are left exactly where they are.
+branches are left exactly where they are, and the dry run lists them under
+"needs you" or "still in flight" so you know what is yours to settle.
+Detached checkouts of merged PRs are left too; `--detached` removes the
+ones that hold no work of their own.
 
 ## Commands
 
@@ -135,7 +139,7 @@ branches are left exactly where they are.
 | `warmtree release <branch> [--keep-branch] [--force]` | Park the slot back on the base branch and mark it ready. Refuses a dirty tree unless `--force`. Deletes the branch if it is merged; an unmerged branch is always kept. Refuses a slot leased to another still-running session (the one that ran `take` or `adopt`); `--force` overrides. `--json` prints `slot`, `branch`, `branch_deleted`. |
 | `warmtree exec <branch> -- <command...>` | Run a command inside the slot holding `<branch>`, with `WARMTREE_SLOT` set. Streams and exit code pass through, so `warmtree exec fix/tests -- npm test` behaves like running it there. Does not pin the slot: do not release a branch while a command still runs in it. |
 | `warmtree adopt <path>` | Register an existing worktree as a taken slot, in place; nothing on disk changes. At `release` the folder moves into the pool and its dependencies are recycled. |
-| `warmtree sweep [--fetch] [--detached]` | Fold finished work into the pool: release taken slots whose branch is merged, and adopt-then-release hand-made worktrees whose branch is merged. Skips dirty trees, unmerged branches, and slots other sessions hold. `--fetch` first, so branches merged only upstream count. Squash-merged branches are not detected. `--detached` also removes hand-made worktrees parked on a detached HEAD whose commit is already an ancestor of base — validation checkouts of merged PRs — but keeps any that has uncommitted changes, is locked, has a bisect, rebase, or merge in progress, holds commits made there that no surviving ref reaches, contains a submodule or another nested git repository, holds ignored files other than whole dependency, cache, and build folders (an `.env`, even inside `build/`, keeps it), or had its HEAD move in the last 14 days; sweep says which. Without the flag, sweep prints a hint when it sees a removable one. |
+| `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold finished work into the pool: release taken slots whose branch is merged, and adopt-then-release hand-made worktrees whose branch is merged. Skips dirty trees, unmerged branches, and slots other sessions hold. `--fetch` first, so branches merged only upstream count. Squash-merged branches are not detected. `--detached` also removes hand-made worktrees parked on a detached HEAD whose commit is already an ancestor of base — validation checkouts of merged PRs — but keeps any that has uncommitted changes, is locked, has a bisect, rebase, or merge in progress, holds commits made there that no surviving ref reaches, contains a submodule or another nested git repository, holds ignored files other than whole dependency, cache, and build folders (an `.env`, even inside `build/`, keeps it), or had its HEAD move in the last 14 days; sweep says which. Without the flag, sweep prints a hint when it sees a removable one. `--dry-run` changes nothing and lists the worktrees sweep decides about in four groups: what it would clean up, what needs you (uncommitted changes, stranded commits, an `.env`, a paused bisect), what only `--detached` would remove, and what is still in flight. Squash-merged branches show as in flight; release those yourself. |
 | `warmtree refresh [--fetch]` | Move every waiting slot to the current base commit and re-copy files. `--fetch` fetches first and parks slots on `origin/<base>`, so they track the remote even when your local base branch is behind; your own checkout is never touched. Re-runs `run` only in slots whose lockfile hashes changed or whose last warm failed. Skips taken slots. |
 | `warmtree size [N]` | Show the configured size and a count of slots by state. With `N`, write the new size to `.warmtree.toml` and grow or shrink the pool to match. Shrinking removes ready slots only. |
 | `warmtree which` | Name the slot the current directory is inside, as `slot-N <state> <branch>`. Exit 1 if not in a slot. |
