@@ -247,3 +247,25 @@ def test_dry_run_predicts_a_slot_held_by_another_live_session(repo: Path):
     assert item.action == "skipped"
     assert f"held by process {other.pid}" in item.reason
     assert item.group == "in-flight"
+
+
+def test_sweep_skips_a_slot_it_cannot_reset_and_carries_on(repo: Path, monkeypatch):
+    pool = Pool(repo, Config(size=0))
+    stuck = committed_slot(pool, repo, "stuck", merged=True)
+    committed_slot(pool, repo, "fine", merged=True)
+    real = git.reset_to_detached
+
+    def flaky(path: Path, ref: str) -> None:
+        if path == stuck:
+            raise git.GitError("unable to unlink old 'app.log': Permission denied")
+        real(path, ref)
+
+    monkeypatch.setattr(git, "reset_to_detached", flaky)
+
+    results = {r.branch: r for r in pool.sweep()}
+
+    assert results["stuck"].action == "skipped"
+    assert "Permission denied" in results["stuck"].reason
+    assert results["stuck"].group == "needs-you"
+    assert results["fine"].action == "released"
+    assert pool.taken("stuck").state == "taken"

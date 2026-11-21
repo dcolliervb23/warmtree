@@ -628,7 +628,7 @@ class Pool:
                 self.release(slot.branch)
                 self._certified_delete(slot.branch)
                 results.append(Swept(slot.name, slot.branch, "released", "merged"))
-            except PoolError as exc:
+            except (PoolError, git.GitError) as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
 
         known = {Path(s.path).resolve() for s in slots()}
