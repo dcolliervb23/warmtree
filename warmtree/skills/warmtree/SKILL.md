@@ -154,8 +154,8 @@ abandoned.
 - It refuses a dirty tree. Commit or stash first. Ask the user before using
   `--force`, which discards uncommitted changes and also takes the slot
   from another still-running session that holds it.
-- It deletes the branch only if it is merged. An unmerged branch is always
-  kept, and `--keep-branch` keeps it regardless.
+- It deletes the branch only if it is merged. An unmerged branch, and the
+  base branch, are always kept, and `--keep-branch` keeps it regardless.
 
 ## Troubleshooting
 
@@ -170,9 +170,12 @@ abandoned.
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 | ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
-| `pool refresh overdue; refreshing in the background` | A scheduled refresh started on its own. It never resets a slot with a branch checked out. | Nothing; carry on. |
-| `slot-N was marked ready but has <branch> checked out; marked taken instead` | Someone checked out a branch by hand in a waiting slot; warmtree kept their work and now counts the slot as taken. | Tell the user. The slot returns to the pool with `warmtree release <branch>` once they are done with it. |
-| `slot-N is not a working tree of this repository; left alone (see warmtree doctor)` | The slot's folder was replaced by something else; warmtree will not reset or delete it. | Run `warmtree doctor` and show the user its report; ask before `--fix` or `remove --force`. |
+| `pool refresh overdue; refreshing in the background` | A scheduled refresh started on its own. It never resets or trims a slot holding someone's work. | Nothing; carry on. |
+| `slot-N was marked ready (or stale) but has <branch> checked out; marked taken instead`, or a `taken` slot in `warmtree status` that no session took | Someone checked out a branch by hand in a waiting slot; warmtree kept their work and now counts the slot as taken. | Tell the user. The slot returns to the pool with `warmtree release <branch>` once they are done with it. |
+| `slot-N is not a working tree of this repository; left alone (see warmtree doctor)` | The slot's folder was replaced by something else; warmtree will not reset or delete it. | Run `warmtree doctor` and show the user its report. The folder is someone else's: let the user decide what to do with it. |
+| `slot-N has a <rebase or bisect> in progress; left alone` or `slot-N has commits on its detached HEAD that no branch holds; left alone` | Someone is working in a waiting slot without a branch. warmtree will not reset, trim, or hand it out. | Tell the user. Never finish, abort, or discard their work to free the slot. |
+| `slot-N folder is missing; skipped (run warmtree doctor)` | The slot's folder was deleted by hand. | Run `warmtree doctor`; `--fix` drops the entry. |
+| `<slots> holds work that removing would delete; use --force` | `remove` found someone's work in a waiting slot. | Tell the user what is there; never add `--force` on your own. |
 
 ## Quick reference
 
@@ -187,9 +190,9 @@ abandoned.
 | `warmtree exec <branch> -- <command...>` | Run one command inside that branch's slot. |
 | `warmtree release <branch> [--keep-branch] [--force] [--json]` | Return a slot. |
 | `warmtree fill` | Create and warm missing slots. |
-| `warmtree refresh [--fetch]` | Move waiting slots to base (`origin/<base>` with `--fetch`), re-warm where lockfiles changed, trim long-idle surplus. |
+| `warmtree refresh [--fetch]` | Move waiting slots to base (`origin/<base>` with `--fetch`), re-warm where lockfiles changed, trim long-idle surplus. Never touches a slot holding someone's work. |
 | `warmtree doctor [--fix]` | Report drift between pool state, git, and disk; `--fix` applies the safe repairs. |
-| `warmtree remove <slot...> [--all] [--force]` | Delete slots and their dependencies. Only when the user asks. |
+| `warmtree remove <slot...> [--all] [--force]` | Delete slots and their dependencies. Refuses taken slots and slots holding work without `--force`. Only when the user asks. |
 | `warmtree adopt <path>` | Register an existing hand-made worktree as a taken slot, in place. |
 | `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
 
