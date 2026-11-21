@@ -11,6 +11,47 @@ general cleanup; the design explains why.
   stop and wait for review before committing.
 - Small commits, one step each. Conventional messages (`feat:`, `test:`, `docs:`).
   Plain messages: no co-author trailers, no session links.
+- Every user-facing capability is documented in the same PR that adds or
+  changes it, in each place a person or agent finds it:
+  - `--help`: the command's description says what it does and what it
+    refuses, every flag has its own help line, and the epilog shows the
+    common sequence when there is one.
+  - README.md, which is also the PyPI page: the command table row and any
+    walkthrough that uses the command.
+  - The shipped skill, `warmtree/skills/warmtree/SKILL.md`, which
+    `warmtree init` installs for agents. Update its quick-reference row, the
+    guidance on when to use the command and when to ask the user first, and
+    a troubleshooting row for each new message an agent will see. Keep
+    `.claude/skills/warmtree/SKILL.md` byte-identical and record the new
+    hash in `SHIPPED_SKILL_HASHES`.
+
+  A capability missing from any of these is not done.
+
+## Review
+The author never reviews alone. Reviewers are fresh background agents briefed
+from `.claude/agents/reviewer.md`. Each brief names the head commit, the slot
+holding that commit, the diff and commit list written to the scratchpad, what
+the change is meant to do, a scratch folder for experiments, and the mode.
+- Open the PR as a draft, review it, fix, then mark it ready. Do not call work
+  done before its review is in.
+- Weight by risk:
+  - Anything that deletes, moves, or resets files, or changes pool state: two
+    reviewers in parallel. One works in checklist mode on Opus, with an attack
+    list. The other works in open mode on Fable, with only the goal, so the
+    author's list does not anchor it.
+  - Other code changes: one checklist reviewer.
+  - Docs only: no review.
+- An outside contributor's PR: reviewers read only and run nothing; the
+  contributor's tests run in CI after the maintainer approves the workflow.
+- Confirm each [REAL] finding with a test that fails before the fix. A finding
+  that cannot be made to fail is dropped, and the PR comment says why.
+- A bug older than the PR is fixed in it only when the PR exposes it or
+  vouches for it (a dry run listing it as safe). Otherwise append it to
+  IDEAS.md.
+- At most two rounds. Round 2 reads only the fix diff, and only for code that
+  deletes, moves, or resets files.
+- Record each round in a PR comment: what was found, what was fixed and by
+  which commit, and every finding left alone with the reason.
 
 ## Publishing hygiene
 - `git config user.email dcolliervb23@users.noreply.github.com` in this repo. Never a personal email.
