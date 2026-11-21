@@ -59,32 +59,44 @@ def test_sweep_removes_merged_detached_worktree_with_flag(repo):
     assert (item.action, item.reason) == ("removed", "detached, merged")
     assert not path.exists()
 
+
 def test_sweep_hints_at_detached_flag_without_it(repo):
     [item] = Pool(repo, Config(size=0)).sweep()
     assert item.action == "kept"
-    assert item.reason == "detached HEAD, merged into base (sweep --detached removes it)"
+    assert (
+        item.reason == "detached HEAD, merged into base (sweep --detached removes it)"
+    )
     assert path.exists()
+
 
 def test_sweep_keeps_unmerged_detached_worktree(repo):
     # detach at a commit NOT on main (commit on a branch, detach at its sha)
     [item] = Pool(repo, Config(size=0)).sweep(detached=True)
     assert (item.action, item.reason) == ("kept", "detached HEAD")
 
+
 def test_sweep_keeps_dirty_merged_detached_worktree(repo):
     # write an untracked file into the detached tree first
     [item] = Pool(repo, Config(size=0)).sweep(detached=True)
-    assert (item.action, item.reason) == ("kept", "detached HEAD with uncommitted changes")
+    assert (item.action, item.reason) == (
+        "kept",
+        "detached HEAD with uncommitted changes",
+    )
     assert path.exists()
+
 
 def test_sweep_removes_detached_at_base_tip(repo):
     # detach at main's current tip; still removed
     [item] = Pool(repo, Config(size=0)).sweep(detached=True)
     assert item.action == "removed"
 
+
 def test_sweep_never_touches_pool_slots(repo):
-    pool = Pool(repo, Config(size=1)); pool.fill()
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
     assert pool.sweep(detached=True) == []
     assert pool.status()[0].state == "ready"
+
 
 def test_sweep_survives_a_worktree_whose_directory_vanished(repo):
     # hand-made worktree (branch or detached), then shutil.rmtree(path);
@@ -92,11 +104,13 @@ def test_sweep_survives_a_worktree_whose_directory_vanished(repo):
     results = Pool(repo, Config(size=0)).sweep()
     assert all(r.action != "removed" for r in results)
 
+
 def test_sweep_detached_counts_upstream_merges_with_fetch(repo, tmp_path):
     # clone fixture per test_sweep_counts_branches_merged_only_upstream:
     # detach a clone worktree at a commit merged only on origin
     [item] = Pool(clone, Config(size=0)).sweep(fetch=True, detached=True)
     assert item.action == "removed"
+
 
 def test_sweep_reports_a_failed_removal_and_continues(repo, monkeypatch):
     # monkeypatch warmtree.pool.git.worktree_remove to raise git.GitError("boom")
@@ -141,6 +155,7 @@ git commit -m "feat: sweep --detached removes merged detached checkouts"
 def test_cli_sweep_prints_removed_and_hint(repo, capsys, monkeypatch):
     # one merged detached worktree; monkeypatch.chdir(repo)
     from warmtree.cli import main
+
     assert main(["sweep"]) == 0
     assert "sweep --detached removes it" in capsys.readouterr().err
     assert main(["sweep", "--detached"]) == 0

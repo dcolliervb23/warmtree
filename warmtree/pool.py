@@ -39,6 +39,97 @@ STATES = ("ready", "taken", "warming", "stale")
 # States refresh works on. Warming slots belong to another process.
 REFRESHABLE = ("ready", "stale")
 
+# sweep --detached leaves a worktree alone if HEAD moved this recently.
+DETACHED_IDLE_DAYS = 14
+
+# Ignored folders sweep --detached may delete: installed dependencies,
+# caches and build output, all rebuilt by an install or a build. Any other
+# ignored file, such as an .env, keeps the worktree.
+REBUILDABLE_DIRS = frozenset(
+    {
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        "dist",
+        "build",
+        "target",
+        "bin",
+        "obj",
+        "vendor",
+        ".gradle",
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+        ".parcel-cache",
+        "coverage",
+    }
+)
+
+
+def _rebuildable(ignored: str) -> bool:
+    """True for an ignored folder git reported whole, named like build output.
+
+    Only the folder itself counts: build/.env is a file the user made, even
+    though it sits in a folder named build.
+    """
+    if not ignored.endswith("/"):
+        return False
+    name = ignored.rstrip("/").rsplit("/", 1)[-1]
+    return name in REBUILDABLE_DIRS or name.endswith(".egg-info")
+
+
+def _nested_repo(path: Path, folders: list[str]) -> str | None:
+    """The first folder under these that holds its own git repository.
+
+    A submodule or a clone inside vendor/ keeps its own uncommitted work and
+    local commits, which the parent worktree's checks cannot see.
+    """
+    for folder in folders:
+        for root, dirs, files in os.walk(path / folder):
+            if ".git" in dirs or ".git" in files:
+                return Path(root).relative_to(path).as_posix()
+    return None
+
+
+def _detached_blocker(repo: Path, path: Path) -> str | None:
+    """Why a merged, detached worktree must not be removed, or None.
+
+    Each check guards something removal would destroy beyond the commit
+    itself, which base already holds.
+    """
+    if git.is_dirty(path):
+        return "has uncommitted changes"
+    if git.is_locked(path):
+        return "is locked"
+    operation = git.operation_in_progress(path)
+    if operation is not None:
+        return f"a {operation} is in progress"
+    if git.has_stranded_commits(repo, path):
+        return "has commits no branch or tag holds"
+    ignored = git.ignored_paths(path)
+    nested = _nested_repo(
+        path, git.gitlinks(path) + [p for p in ignored if _rebuildable(p)]
+    )
+    if nested is not None:
+        return f"contains a nested git repository: {nested}"
+    precious = [p for p in ignored if not _rebuildable(p)]
+    if precious:
+        named = ", ".join(precious[:3])
+        if len(precious) > 3:
+            named += f" and {len(precious) - 3} more"
+        return f"holds ignored files sweep cannot rebuild: {named}"
+    idle_seconds = datetime.now(UTC).timestamp() - git.head_moved_at(path)
+    if idle_seconds < DETACHED_IDLE_DAYS * 86400:
+        return f"was used within the last {DETACHED_IDLE_DAYS} days"
+    return None
+
 
 class PoolError(Exception):
     """A pool operation cannot proceed. The message is written for the user."""
@@ -87,7 +178,7 @@ class Swept:
 
     name: str  # slot name, or a worktree path
     branch: str | None
-    action: str  # released | folded | kept | skipped
+    action: str  # released | folded | removed | kept | skipped
     reason: str
 
 
@@ -441,7 +532,7 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def sweep(self, fetch: bool = False) -> list["Swept"]:
+    def sweep(self, fetch: bool = False, detached: bool = False) -> list["Swept"]:
         """Fold finished work back into the pool.
 
         Two passes with one test: a branch git certifies as merged into
@@ -451,6 +542,9 @@ class Pool:
         trees, unmerged branches, slots other live sessions hold, and
         anything that is not ours are skipped with a reason. Squash-merged
         branches are not detected: their commits are not ancestors of base.
+        A hand-made worktree parked on a detached HEAD that is an ancestor
+        of base is reported with a hint; with detached=True the clean ones
+        are removed outright — there is no branch to lose.
         """
         if fetch:
             git.fetch(self.repo_root)
@@ -478,15 +572,50 @@ class Pool:
 
         known = {Path(s.path).resolve() for s in self.status()}
         known.add(self.repo_root.resolve())
+        pool_root = self.dir.resolve()
         for path in git.worktree_list(self.repo_root):
             if path in known:
                 continue
+            if path == pool_root or path.is_relative_to(pool_root):
+                # A slot state.json forgot is still a slot, not a hand-made
+                # worktree; doctor owns that drift, sweep must not delete it.
+                continue
             label = str(path)
+            if not path.is_dir():
+                continue  # registration outlived the directory
             if not git.owns_worktree(self.repo_root, path):
                 continue  # not ours to reason about
             branch = git.head_branch(path)
             if branch is None:
-                results.append(Swept(label, None, "kept", "detached HEAD"))
+                head = git.rev_parse(path, "HEAD")
+                if not git.is_ancestor(self.repo_root, head, base_ref):
+                    results.append(Swept(label, None, "kept", "detached HEAD"))
+                    continue
+                try:
+                    blocker = _detached_blocker(self.repo_root, path)
+                except git.GitError as exc:
+                    blocker = f"could not be inspected: {exc}"
+                if blocker is not None:
+                    reason = f"detached HEAD, merged, but {blocker}"
+                    results.append(Swept(label, None, "kept", reason))
+                elif not detached:
+                    results.append(
+                        Swept(
+                            label,
+                            None,
+                            "kept",
+                            "detached HEAD, merged into base "
+                            "(sweep --detached removes it)",
+                        )
+                    )
+                else:
+                    try:
+                        git.worktree_remove(self.repo_root, path)
+                        results.append(
+                            Swept(label, None, "removed", "detached, merged")
+                        )
+                    except git.GitError as exc:
+                        results.append(Swept(label, None, "skipped", str(exc)))
                 continue
             if not merged(branch):
                 results.append(Swept(label, branch, "kept", "not merged"))

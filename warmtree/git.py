@@ -48,12 +48,13 @@ def allow_hooks(allowed: bool) -> None:
     _hooks_allowed = allowed
 
 
-def run(args: list[str], cwd: Path) -> str:
+def run(args: list[str], cwd: Path, stdin: str | None = None) -> str:
     """Run `git <args>` in cwd and return stripped stdout."""
     prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_no_hooks_path()}"]
     result = subprocess.run(
         ["git", *prefix, *args],
         cwd=cwd,
+        input=stdin,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -166,9 +167,111 @@ def is_ancestor(repo: Path, ref: str, of: str) -> bool:
     return True
 
 
+_SHOW_ALL = ("--untracked-files=normal", "--ignore-submodules=none")
+
+
 def is_dirty(path: Path) -> bool:
-    """True when the worktree has modified, staged, or untracked files."""
-    return bool(run(["status", "--porcelain"], cwd=path))
+    """True when the worktree has modified, staged, or untracked files.
+
+    The flags override config that would hide untracked files or submodule
+    changes; --no-optional-locks keeps status from rewriting the index
+    under a git command the user is running.
+    """
+    return bool(
+        run(["--no-optional-locks", "status", "--porcelain", *_SHOW_ALL], cwd=path)
+    )
+
+
+def git_dir(path: Path) -> Path:
+    """The worktree's private git directory (.git/worktrees/<name>)."""
+    return Path(run(["rev-parse", "--absolute-git-dir"], cwd=path))
+
+
+# Files git leaves in a worktree's git directory while an operation waits
+# for the user, mapped to the operation's name.
+OPERATION_MARKERS = (
+    ("BISECT_LOG", "bisect"),
+    ("rebase-merge", "rebase"),
+    ("rebase-apply", "rebase"),
+    ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherry-pick"),
+    ("REVERT_HEAD", "revert"),
+    ("sequencer", "cherry-pick"),
+)
+
+
+def operation_in_progress(path: Path) -> str | None:
+    """Name of the git operation paused in this worktree, if any."""
+    directory = git_dir(path)
+    for marker, operation in OPERATION_MARKERS:
+        if (directory / marker).exists():
+            return operation
+    return None
+
+
+def has_stranded_commits(repo: Path, path: Path) -> bool:
+    """True when this worktree holds commits no surviving ref reaches.
+
+    Removing a worktree deletes its HEAD history and its own refs
+    (refs/worktree/*); commits only they reach would be lost. The refs
+    that survive are read from the main worktree.
+    """
+    history = run(["reflog", "show", "--format=%H", "HEAD"], cwd=path)
+    own_refs = run(
+        ["for-each-ref", "--format=%(objectname)", "refs/worktree/"], cwd=path
+    )
+    history = "\n".join(line for line in (history, own_refs) if line)
+    if not history:
+        return False
+    refs = run(["for-each-ref", "--format=^%(objectname)"], cwd=repo)
+    stranded = run(
+        ["rev-list", "--stdin", "--ignore-missing"],
+        cwd=repo,
+        stdin=f"{history}\n{refs}\n",
+    )
+    return bool(stranded)
+
+
+def is_locked(path: Path) -> bool:
+    """True when `git worktree lock` protects this worktree."""
+    return (git_dir(path) / "locked").exists()
+
+
+def gitlinks(path: Path) -> list[str]:
+    """Paths of the submodules the worktree's index records."""
+    output = run(["ls-files", "--stage", "-z"], cwd=path)
+    return [
+        entry.split("\t", 1)[1]
+        for entry in output.split("\0")
+        if entry.startswith("160000 ")
+    ]
+
+
+def head_moved_at(path: Path) -> float:
+    """When HEAD last moved in this worktree, as a Unix timestamp."""
+    directory = git_dir(path)
+    stamps = [
+        (directory / name).stat().st_mtime
+        for name in ("HEAD", "logs/HEAD")
+        if (directory / name).exists()
+    ]
+    return max(stamps)
+
+
+def ignored_paths(path: Path) -> list[str]:
+    """Ignored files and folders in the worktree; folders end in /."""
+    output = run(
+        [
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "-z",
+            "--ignored=matching",
+            *_SHOW_ALL,
+        ],
+        cwd=path,
+    )
+    return [entry[3:] for entry in output.split("\0") if entry.startswith("!! ")]
 
 
 def branch_exists(repo: Path, name: str) -> bool:

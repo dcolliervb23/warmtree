@@ -199,7 +199,11 @@ def build_parser() -> argparse.ArgumentParser:
         "folding their folders and dependencies into the pool. Dirty trees, "
         "unmerged branches, and slots other sessions hold are skipped with "
         "a reason. Squash-merged branches are not detected: their commits "
-        "are not ancestors of base.",
+        "are not ancestors of base. With --detached, clean hand-made "
+        "worktrees parked on a detached HEAD whose commit is an ancestor "
+        "of base are removed, unless they are locked, mid-operation, hold "
+        "commits or nested repositories only they have, hold ignored files "
+        "that are not dependency or build folders, or moved in the last 14 days.",
         epilog="onboarding a repo with a pile of old worktrees: "
         "warmtree init, then warmtree sweep --fetch",
     )
@@ -207,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch",
         action="store_true",
         help="fetch origin first, so branches merged only upstream count",
+    )
+    sweep.add_argument(
+        "--detached",
+        action="store_true",
+        help="also remove idle, clean detached worktrees whose commit is merged "
+        "into base and that hold no work of their own",
     )
     sweep.set_defaults(func=cmd_sweep)
 
@@ -538,17 +548,27 @@ def cmd_adopt(args: argparse.Namespace) -> int:
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch)
+    results = _pool().sweep(fetch=args.fetch, detached=args.detached)
     folded = 0
+    removed = 0
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
             print(f"{item.action}: {item.name} ({item.branch})")
+        elif item.action == "removed":
+            removed += 1
+            print(f"removed: {item.name} ({item.reason})")
         elif item.action == "skipped":
-            note(f"skipped {item.name} ({item.branch}): {item.reason}")
+            held = item.branch if item.branch is not None else "detached"
+            note(f"skipped {item.name} ({held}): {item.reason}")
+        elif item.action == "kept" and item.reason.startswith("detached HEAD, merged"):
+            note(f"kept {item.name}: {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
     skipped = sum(1 for item in results if item.action == "skipped")
-    print(f"swept {folded} into the pool; kept {kept} in flight; skipped {skipped}")
+    tally = f"swept {folded} into the pool"
+    if removed:
+        tally += f"; removed {removed}"
+    print(f"{tally}; kept {kept} in flight; skipped {skipped}")
     return 0
 
 
