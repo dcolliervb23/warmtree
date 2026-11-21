@@ -167,9 +167,19 @@ def is_ancestor(repo: Path, ref: str, of: str) -> bool:
     return True
 
 
+_SHOW_ALL = ("--untracked-files=normal", "--ignore-submodules=none")
+
+
 def is_dirty(path: Path) -> bool:
-    """True when the worktree has modified, staged, or untracked files."""
-    return bool(run(["status", "--porcelain"], cwd=path))
+    """True when the worktree has modified, staged, or untracked files.
+
+    The flags override config that would hide untracked files or submodule
+    changes; --no-optional-locks keeps status from rewriting the index
+    under a git command the user is running.
+    """
+    return bool(
+        run(["--no-optional-locks", "status", "--porcelain", *_SHOW_ALL], cwd=path)
+    )
 
 
 def git_dir(path: Path) -> Path:
@@ -199,21 +209,42 @@ def operation_in_progress(path: Path) -> str | None:
     return None
 
 
-def has_stranded_commits(path: Path) -> bool:
-    """True when the worktree's HEAD history holds commits no ref reaches.
+def has_stranded_commits(repo: Path, path: Path) -> bool:
+    """True when this worktree holds commits no surviving ref reaches.
 
-    Such commits were made here and then left behind; removing the
-    worktree deletes the history that is their only anchor.
+    Removing a worktree deletes its HEAD history and its own refs
+    (refs/worktree/*); commits only they reach would be lost. The refs
+    that survive are read from the main worktree.
     """
     history = run(["reflog", "show", "--format=%H", "HEAD"], cwd=path)
+    own_refs = run(
+        ["for-each-ref", "--format=%(objectname)", "refs/worktree/"], cwd=path
+    )
+    history = "\n".join(line for line in (history, own_refs) if line)
     if not history:
         return False
+    refs = run(["for-each-ref", "--format=^%(objectname)"], cwd=repo)
     stranded = run(
-        ["rev-list", "--stdin", "--ignore-missing", "--not", "--all"],
-        cwd=path,
-        stdin=history + "\n",
+        ["rev-list", "--stdin", "--ignore-missing"],
+        cwd=repo,
+        stdin=f"{history}\n{refs}\n",
     )
     return bool(stranded)
+
+
+def is_locked(path: Path) -> bool:
+    """True when `git worktree lock` protects this worktree."""
+    return (git_dir(path) / "locked").exists()
+
+
+def gitlinks(path: Path) -> list[str]:
+    """Paths of the submodules the worktree's index records."""
+    output = run(["ls-files", "--stage", "-z"], cwd=path)
+    return [
+        entry.split("\t", 1)[1]
+        for entry in output.split("\0")
+        if entry.startswith("160000 ")
+    ]
 
 
 def head_moved_at(path: Path) -> float:
@@ -228,11 +259,19 @@ def head_moved_at(path: Path) -> float:
 
 
 def ignored_paths(path: Path) -> list[str]:
-    """Ignored files and folders in the worktree, as git reports them."""
-    output = run(["status", "--porcelain", "-z", "--ignored=matching"], cwd=path)
-    return [
-        entry[3:].rstrip("/") for entry in output.split("\0") if entry.startswith("!! ")
-    ]
+    """Ignored files and folders in the worktree; folders end in /."""
+    output = run(
+        [
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "-z",
+            "--ignored=matching",
+            *_SHOW_ALL,
+        ],
+        cwd=path,
+    )
+    return [entry[3:] for entry in output.split("\0") if entry.startswith("!! ")]
 
 
 def branch_exists(repo: Path, name: str) -> bool:

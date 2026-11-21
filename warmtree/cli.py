@@ -201,7 +201,9 @@ def build_parser() -> argparse.ArgumentParser:
         "a reason. Squash-merged branches are not detected: their commits "
         "are not ancestors of base. With --detached, clean hand-made "
         "worktrees parked on a detached HEAD whose commit is an ancestor "
-        "of base are removed.",
+        "of base are removed, unless they are locked, mid-operation, hold "
+        "commits or nested repositories only they have, hold ignored files "
+        "that are not dependency or build folders, or moved in the last 14 days.",
         epilog="onboarding a repo with a pile of old worktrees: "
         "warmtree init, then warmtree sweep --fetch",
     )
@@ -213,7 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument(
         "--detached",
         action="store_true",
-        help="also remove clean detached worktrees whose commit is merged into base",
+        help="also remove idle, clean detached worktrees whose commit is merged "
+        "into base and that hold no work of their own",
     )
     sweep.add_argument(
         "--dry-run",
