@@ -1,5 +1,8 @@
 """`sweep --dry-run` reports what sweep would do, and why, without doing it."""
 
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from tests.conftest import git as run_git
@@ -157,8 +160,90 @@ def test_cli_sweep_points_at_dry_run_when_it_leaves_things(
 ):
     from warmtree.cli import main
 
-    hand_made(repo, "wip", merged=False)
+    messy = hand_made(repo, "messy", merged=True)
+    (messy / "uncommitted.txt").write_text("wip\n")
     monkeypatch.chdir(repo)
 
     assert main(["sweep"]) == 0
     assert "warmtree sweep --dry-run" in capsys.readouterr().err
+
+
+def test_cli_sweep_stays_quiet_when_only_work_in_flight_remains(
+    repo: Path, capsys, monkeypatch
+):
+    from warmtree.cli import main
+
+    hand_made(repo, "wip", merged=False)
+    monkeypatch.chdir(repo)
+
+    assert main(["sweep"]) == 0
+    assert "--dry-run" not in capsys.readouterr().err
+
+
+def test_dry_run_and_sweep_survive_a_slot_folder_deleted_by_hand(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    gone = committed_slot(pool, repo, "gone", merged=True)
+    shutil.rmtree(gone)
+
+    predicted = pool.sweep(dry_run=True)
+    actual = pool.sweep()
+
+    assert decisions(predicted) == decisions(actual)
+    [item] = predicted
+    assert item.action == "skipped"
+    assert "run `warmtree doctor`" in item.reason
+    assert item.group == "needs-you"
+
+
+def test_sweep_never_folds_the_base_branch(repo: Path, tmp_path: Path):
+    # The main checkout sits on a feature branch; main lives in its own
+    # hand-made worktree. Sweep must not reset it or delete local main.
+    run_git("checkout", "-q", "-b", "feat", cwd=repo)
+    wt_main = repo.parent / "wt-main"
+    run_git("worktree", "add", "-q", str(wt_main), "main", cwd=repo)
+    pool = Pool(repo, Config(size=0, base="main"))
+
+    predicted = pool.sweep(dry_run=True)
+    actual = pool.sweep()
+
+    assert decisions(predicted) == decisions(actual)
+    [item] = actual
+    assert (item.branch, item.action, item.reason) == (
+        "main",
+        "kept",
+        "is the base branch",
+    )
+    assert git.branch_exists(repo, "main")
+    assert git.head_branch(wt_main) == "main"
+
+
+def test_dry_run_creates_no_pool_directory(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    hand_made(repo, "wip", merged=False)
+
+    pool.sweep(dry_run=True)
+
+    assert not pool.dir.exists()
+
+
+def test_dry_run_predicts_a_slot_held_by_another_live_session(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    committed_slot(pool, repo, "held", merged=True)
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        with pool.locked():
+            slots = pool.load_state()
+            slots[0].lease_pid = other.pid
+            pool.save_state(slots)
+
+        predicted = pool.sweep(dry_run=True)
+        actual = pool.sweep()
+    finally:
+        other.kill()
+        other.wait()
+
+    assert decisions(predicted) == decisions(actual)
+    [item] = predicted
+    assert item.action == "skipped"
+    assert f"held by process {other.pid}" in item.reason
+    assert item.group == "in-flight"

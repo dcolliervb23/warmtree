@@ -39,6 +39,9 @@ STATES = ("ready", "taken", "warming", "stale")
 # States refresh works on. Warming slots belong to another process.
 REFRESHABLE = ("ready", "stale")
 
+# The base branch is always merged into itself; sweep must never fold it.
+BASE_REASON = "is the base branch"
+
 # sweep --detached leaves a worktree alone if HEAD moved this recently.
 DETACHED_IDLE_DAYS = 14
 
@@ -502,7 +505,8 @@ class Pool:
         Shared by release and sweep's dry run, so a dry run predicts exactly
         the refusals a real release raises.
         """
-        if not git.owns_worktree(self.repo_root, Path(slot.path)):
+        path = Path(slot.path)
+        if not path.is_dir() or not git.owns_worktree(self.repo_root, path):
             return (
                 f"{slot.name} is no longer a working tree of this "
                 "repository; run `warmtree doctor`"
@@ -518,7 +522,7 @@ class Pool:
                 f"(since {slot.lease_since}); release from that session, "
                 "wait for it to exit, or use --force"
             )
-        if not force and git.is_dirty(Path(slot.path)):
+        if not force and git.is_dirty(path):
             return (
                 f"{slot.name} has uncommitted changes; commit or stash them, "
                 "or use --force to discard them"
@@ -593,12 +597,22 @@ class Pool:
         if git.ref_exists(self.repo_root, remote_ref):
             base_ref = remote_ref
         results: list[Swept] = []
+        base_branch = self.base()
 
         def merged(branch: str) -> bool:
             return git.is_ancestor(self.repo_root, branch, base_ref)
 
-        for slot in self.status():
+        def slots() -> list[Slot]:
+            # status() takes the pool lock, which creates the pool directory;
+            # with no state file there are no slots, and a dry run must not
+            # leave a directory behind.
+            return self.status() if self.state_path.exists() else []
+
+        for slot in slots():
             if slot.state != "taken" or slot.branch is None:
+                continue
+            if slot.branch == base_branch:
+                results.append(Swept(slot.name, slot.branch, "kept", BASE_REASON))
                 continue
             if not merged(slot.branch):
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
@@ -617,7 +631,7 @@ class Pool:
             except PoolError as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
 
-        known = {Path(s.path).resolve() for s in self.status()}
+        known = {Path(s.path).resolve() for s in slots()}
         known.add(self.repo_root.resolve())
         pool_root = self.dir.resolve()
         for path in git.worktree_list(self.repo_root):
@@ -665,6 +679,9 @@ class Pool:
                         )
                     except git.GitError as exc:
                         results.append(Swept(label, None, "skipped", str(exc)))
+                continue
+            if branch == base_branch:
+                results.append(Swept(label, branch, "kept", BASE_REASON))
                 continue
             if not merged(branch):
                 results.append(Swept(label, branch, "kept", "not merged"))

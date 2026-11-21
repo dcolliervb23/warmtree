@@ -611,7 +611,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     if removed:
         tally += f"; removed {removed}"
     print(f"{tally}; kept {kept} in flight; skipped {skipped}")
-    if kept or skipped:
+    if any(item.group in ("needs-you", "with-detached") for item in results):
         note("to see what sweep left and why: warmtree sweep --dry-run")
     return 0
 
