@@ -481,8 +481,13 @@ class Pool:
 
         known = {Path(s.path).resolve() for s in self.status()}
         known.add(self.repo_root.resolve())
+        pool_root = self.dir.resolve()
         for path in git.worktree_list(self.repo_root):
             if path in known:
+                continue
+            if path == pool_root or path.is_relative_to(pool_root):
+                # A slot state.json forgot is still a slot, not a hand-made
+                # worktree; doctor owns that drift, sweep must not delete it.
                 continue
             label = str(path)
             if not path.is_dir():

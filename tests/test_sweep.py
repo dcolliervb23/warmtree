@@ -273,3 +273,33 @@ def test_cli_sweep_prints_removed_and_hint(repo: Path, capsys, monkeypatch):
     assert "removed: " in out
     assert "(detached, merged)" in out
     assert "removed 1" in out
+
+
+def test_sweep_detached_never_removes_an_orphaned_pool_slot(repo: Path):
+    # state.json lost: the slot is no longer in `known`, but it still lives
+    # in the pool directory and must not be swept away.
+    pool = Pool(repo, Config(size=1))
+    [slot] = pool.fill()
+    pool.state_path.unlink()
+
+    results = pool.sweep(detached=True)
+
+    assert all(r.action != "removed" for r in results)
+    assert Path(slot.path).is_dir()
+
+
+def test_cli_sweep_reports_failed_removal_without_none(repo: Path, capsys, monkeypatch):
+    from warmtree.cli import main
+
+    detached_at(repo, older_commit(repo))
+    monkeypatch.chdir(repo)
+
+    def refuse(repo_root: Path, target: Path) -> None:
+        raise git.GitError("boom")
+
+    monkeypatch.setattr(git, "worktree_remove", refuse)
+
+    assert main(["sweep", "--detached"]) == 0
+    err = capsys.readouterr().err
+    assert "(detached): boom" in err
+    assert "None" not in err

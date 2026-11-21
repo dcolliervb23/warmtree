@@ -556,7 +556,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             removed += 1
             print(f"removed: {item.name} ({item.reason})")
         elif item.action == "skipped":
-            note(f"skipped {item.name} ({item.branch}): {item.reason}")
+            held = item.branch if item.branch is not None else "detached"
+            note(f"skipped {item.name} ({held}): {item.reason}")
         elif item.action == "kept" and "sweep --detached" in item.reason:
             note(f"kept {item.name}: {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
