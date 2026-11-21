@@ -74,11 +74,31 @@ REBUILDABLE_DIRS = frozenset(
 
 
 def _rebuildable(ignored: str) -> bool:
-    parts = ignored.split("/")
-    return any(part in REBUILDABLE_DIRS or part.endswith(".egg-info") for part in parts)
+    """True for an ignored folder git reported whole, named like build output.
+
+    Only the folder itself counts: build/.env is a file the user made, even
+    though it sits in a folder named build.
+    """
+    if not ignored.endswith("/"):
+        return False
+    name = ignored.rstrip("/").rsplit("/", 1)[-1]
+    return name in REBUILDABLE_DIRS or name.endswith(".egg-info")
 
 
-def _detached_blocker(path: Path) -> str | None:
+def _nested_repo(path: Path, folders: list[str]) -> str | None:
+    """The first folder under these that holds its own git repository.
+
+    A submodule or a clone inside vendor/ keeps its own uncommitted work and
+    local commits, which the parent worktree's checks cannot see.
+    """
+    for folder in folders:
+        for root, dirs, files in os.walk(path / folder):
+            if ".git" in dirs or ".git" in files:
+                return Path(root).relative_to(path).as_posix()
+    return None
+
+
+def _detached_blocker(repo: Path, path: Path) -> str | None:
     """Why a merged, detached worktree must not be removed, or None.
 
     Each check guards something removal would destroy beyond the commit
@@ -86,12 +106,20 @@ def _detached_blocker(path: Path) -> str | None:
     """
     if git.is_dirty(path):
         return "has uncommitted changes"
+    if git.is_locked(path):
+        return "is locked"
     operation = git.operation_in_progress(path)
     if operation is not None:
         return f"a {operation} is in progress"
-    if git.has_stranded_commits(path):
+    if git.has_stranded_commits(repo, path):
         return "has commits no branch or tag holds"
-    precious = [p for p in git.ignored_paths(path) if not _rebuildable(p)]
+    ignored = git.ignored_paths(path)
+    nested = _nested_repo(
+        path, git.gitlinks(path) + [p for p in ignored if _rebuildable(p)]
+    )
+    if nested is not None:
+        return f"contains a nested git repository: {nested}"
+    precious = [p for p in ignored if not _rebuildable(p)]
     if precious:
         named = ", ".join(precious[:3])
         if len(precious) > 3:
@@ -563,7 +591,10 @@ class Pool:
                 if not git.is_ancestor(self.repo_root, head, base_ref):
                     results.append(Swept(label, None, "kept", "detached HEAD"))
                     continue
-                blocker = _detached_blocker(path)
+                try:
+                    blocker = _detached_blocker(self.repo_root, path)
+                except git.GitError as exc:
+                    blocker = f"could not be inspected: {exc}"
                 if blocker is not None:
                     reason = f"detached HEAD, merged, but {blocker}"
                     results.append(Swept(label, None, "kept", reason))

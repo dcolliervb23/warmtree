@@ -294,6 +294,7 @@ def test_sweep_removes_detached_worktree_with_only_rebuildable_ignored_files(
 ):
     path = detached_at(repo, ignoring(repo, "node_modules/\n__pycache__/\n"))
     (path / "node_modules" / "left-pad").mkdir(parents=True)
+    (path / "node_modules" / "left-pad" / "index.js").write_text("x\n")
     (path / "pkg" / "node_modules").mkdir(parents=True)
     (path / "pkg" / "node_modules" / "x.js").write_text("x\n")
     (path / "src" / "__pycache__").mkdir(parents=True)
@@ -412,6 +413,7 @@ def test_sweep_detached_never_removes_an_orphaned_pool_slot(repo: Path):
     pool = Pool(repo, Config(size=1))
     [slot] = pool.fill()
     pool.state_path.unlink()
+    idle(Path(slot.path))  # so only the pool-directory guard can keep it
 
     results = pool.sweep(detached=True)
 
@@ -434,3 +436,120 @@ def test_cli_sweep_reports_failed_removal_without_none(repo: Path, capsys, monke
     err = capsys.readouterr().err
     assert "(detached): boom" in err
     assert "None" not in err
+
+
+def kept_reason(repo: Path, path: Path) -> str:
+    results = Pool(repo, Config(size=0)).sweep(detached=True)
+    [item] = [r for r in results if r.name == str(path)]
+    assert item.action == "kept", item
+    assert path.exists()
+    return item.reason
+
+
+def test_sweep_keeps_ignored_file_inside_a_rebuildable_named_folder(repo: Path):
+    # build/ here is tracked source, not output: only an ignored build/
+    # folder as a whole is rebuildable.
+    (repo / "build").mkdir()
+    (repo / "build" / "run.sh").write_text("echo hi\n")
+    run_git("add", "build", cwd=repo)
+    path = detached_at(repo, ignoring(repo, ".env\n"))
+    (path / "build" / ".env").write_text("SECRET=1\n")
+
+    assert kept_reason(repo, path) == (
+        "detached HEAD, merged, but holds ignored files sweep cannot rebuild: "
+        "build/.env"
+    )
+
+
+def test_sweep_keeps_a_nested_repository_inside_a_rebuildable_folder(repo: Path):
+    path = detached_at(repo, ignoring(repo, "vendor/\n"))
+    lib = path / "vendor" / "lib"
+    lib.mkdir(parents=True)
+    run_git("init", "-q", cwd=lib)
+
+    assert kept_reason(repo, path) == (
+        "detached HEAD, merged, but contains a nested git repository: vendor/lib"
+    )
+
+
+def test_sweep_keeps_a_detached_worktree_with_a_submodule(repo: Path, tmp_path: Path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    run_git("init", "-q", "-b", "main", cwd=sub)
+    run_git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "s",
+        cwd=sub,
+    )
+    allow = ("-c", "protocol.file.allow=always")
+    run_git(*allow, "submodule", "add", "-q", str(sub), "sub", cwd=repo)
+    run_git("commit", "-q", "-m", "add sub", cwd=repo)
+    path = detached_at(repo, older_commit(repo), untouched=False)
+    run_git(*allow, "submodule", "update", "-q", "--init", cwd=path)
+    idle(path)
+
+    assert kept_reason(repo, path) == (
+        "detached HEAD, merged, but contains a nested git repository: sub"
+    )
+
+
+def test_sweep_does_not_crash_when_untracked_files_are_hidden(repo: Path):
+    run_git("config", "status.showUntrackedFiles", "no", cwd=repo)
+    path = detached_at(repo, older_commit(repo))
+    (path / "notes.txt").write_text("notes\n")
+
+    assert kept_reason(repo, path) == (
+        "detached HEAD, merged, but has uncommitted changes"
+    )
+
+
+def test_sweep_keeps_a_locked_detached_worktree(repo: Path):
+    path = detached_at(repo, older_commit(repo))
+    run_git("worktree", "lock", str(path), cwd=repo)
+
+    assert kept_reason(repo, path) == "detached HEAD, merged, but is locked"
+
+
+def test_sweep_keeps_commits_held_only_by_this_worktrees_own_refs(repo: Path):
+    older = older_commit(repo)
+    path = detached_at(repo, older)
+    (path / "work.txt").write_text("work\n")
+    run_git("add", ".", cwd=path)
+    run_git("commit", "-q", "-m", "kept by a worktree ref", cwd=path)
+    run_git("update-ref", "refs/worktree/keep", "HEAD", cwd=path)
+    run_git("checkout", "-q", "--detach", older, cwd=path)
+    run_git("reflog", "expire", "--expire=all", "--all", cwd=path)
+    idle(path)
+
+    assert kept_reason(repo, path) == (
+        "detached HEAD, merged, but has commits no branch or tag holds"
+    )
+
+
+def test_sweep_keeps_a_tree_it_cannot_inspect_and_carries_on(repo: Path, monkeypatch):
+    older = older_commit(repo)
+    broken = detached_at(repo, older, name="wt-broken")
+    fine = detached_at(repo, older, name="wt-fine")
+    real = git.ignored_paths
+
+    def flaky(path: Path) -> list[str]:
+        if path == broken:
+            raise git.GitError("boom")
+        return real(path)
+
+    monkeypatch.setattr(git, "ignored_paths", flaky)
+
+    results = {r.name: r for r in Pool(repo, Config(size=0)).sweep(detached=True)}
+
+    assert results[str(broken)].action == "kept"
+    assert results[str(broken)].reason == (
+        "detached HEAD, merged, but could not be inspected: boom"
+    )
+    assert results[str(fine)].action == "removed"
