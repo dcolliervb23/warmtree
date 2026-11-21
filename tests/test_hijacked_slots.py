@@ -136,3 +136,80 @@ def test_a_plain_directory_inside_the_repo_is_never_a_slot(repo: Path):
     taken, cold = pool.take("feature")
     assert taken.name != slot.name
     assert cold is True
+
+
+def handwork(slot_path: str) -> Path:
+    """Hijack a parked slot and leave edits only that folder holds."""
+    path = Path(slot_path)
+    hijack(slot_path, "stray")
+    (path / "README.md").write_text("edited by hand\n")
+    (path / "notes.txt").write_text("never committed\n")
+    return path
+
+
+def test_refresh_keeps_the_work_in_a_hijacked_slot(pool: Pool):
+    [first, _] = pool.status()
+    path = handwork(first.path)
+
+    pool.refresh()
+
+    assert (path / "README.md").read_text() == "edited by hand\n"
+    assert (path / "notes.txt").exists()
+    assert git.head_branch(path) == "stray"
+    assert pool.taken("stray").name == first.name
+
+
+def test_size_shrink_keeps_a_hijacked_slot(repo: Path):
+    Pool(repo, Config(size=2)).fill()
+    smaller = Pool(repo, Config(size=1))
+    second = smaller.status()[1]  # trim removes the highest number first
+    path = handwork(second.path)
+
+    smaller.trim()
+
+    assert (path / "notes.txt").exists()
+    assert smaller.taken("stray").name == second.name
+
+
+def test_idle_trim_keeps_a_hijacked_slot(repo: Path):
+    Pool(repo, Config(size=3)).fill()
+    pool = Pool(repo, Config(size=1))
+    then = "2000-01-01T00:00:00+00:00"
+    for slot in pool.status():
+        pool._update_slot(slot.name, released=then, created=then, warmed=then)
+    oldest = pool.status()[0]
+    path = handwork(oldest.path)
+
+    pool.refresh()
+
+    assert (path / "notes.txt").exists()
+    assert pool.taken("stray").name == oldest.name
+
+
+def test_refresh_never_runs_git_in_a_plain_directory_inside_the_repo(repo: Path):
+    # git run from a plain folder inside the main checkout acts on the main
+    # checkout: a reset there would delete the user's untracked files.
+    pool = Pool(repo, Config(size=1, dir="pool-inside"))
+    [slot] = pool.fill()
+    shutil.rmtree(slot.path)
+    Path(slot.path).mkdir()
+    (Path(slot.path) / "innocent.txt").write_text("not a worktree\n")
+    (repo / "mine.txt").write_text("untracked work in the main checkout\n")
+
+    pool.refresh()
+
+    assert (repo / "mine.txt").exists()
+    assert (Path(slot.path) / "innocent.txt").exists()
+
+
+def test_trim_never_deletes_a_directory_that_is_not_our_worktree(repo: Path):
+    Pool(repo, Config(size=2)).fill()
+    smaller = Pool(repo, Config(size=1))
+    second = Path(smaller.status()[1].path)
+    shutil.rmtree(second)
+    run_git("init", "-q", "-b", "innocent", str(second), cwd=repo)
+    (second / "theirs.txt").write_text("someone else's repo\n")
+
+    smaller.trim()
+
+    assert (second / "theirs.txt").exists()
