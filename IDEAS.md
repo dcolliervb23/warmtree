@@ -55,3 +55,12 @@ Append here instead of expanding DESIGN.md.
   (config key vs `git clean -ndX`), Windows story (ReFS block cloning is
   rare on dev machines), and whether release-deletes-clone should retire
   reset-on-release entirely once the template path exists.
+- **Fold detached checkouts instead of removing them.** `sweep --detached`
+  (2026-11) removes clean detached worktrees whose HEAD is an ancestor of
+  base. A fold variant could register such a tree directly as a ready slot:
+  next slot name, move the folder into the pool dir, `reset_to_detached` on
+  base, record no lockfile hashes so the next refresh re-warms it. Decided
+  against for now: validation checkouts are stale, so the recycled state
+  needs a full re-warm anyway and remove-plus-fill lands in the same place.
+  Do not teach `adopt` a branchless path; taken slots keep their branch
+  invariant. Revisit only on real demand.
