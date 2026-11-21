@@ -438,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print a JSON list of slots for scripts and agents (name, path, "
         "state, branch, created, warmed, lockfiles, lease_pid, lease_since, "
-        "released)",
+        "released, parked)",
     )
     status.add_argument(
         "--du",
@@ -452,9 +452,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="check the pool for drift between state, git, and disk",
         description="Report drift between the pool's state.json, git, and "
         "the filesystem: slot directories that are gone or replaced, lost "
-        "worktree registrations, slots stuck warming, ready slots with a "
-        "branch checked out, and stray directories in the pool. Exits 1 "
-        "while any finding is left unfixed.",
+        "worktree registrations, slots stuck warming, waiting (ready or "
+        "stale) slots with a branch checked out, and stray directories in "
+        "the pool. Exits 1 while any finding is left unfixed.",
     )
     doctor.add_argument(
         "--fix", action="store_true", help="apply the safe repairs and say which"
@@ -681,11 +681,15 @@ def cmd_take(args: argparse.Namespace) -> int:
 
 
 def cmd_release(args: argparse.Namespace) -> int:
-    slot, branch_deleted = _pool().release(
+    pool = _pool()
+    slot, branch_deleted = pool.release(
         args.branch, keep_branch=args.keep_branch, force=args.force
     )
     if not branch_deleted and not args.keep_branch:
-        note(f"kept branch {args.branch}: it has commits that are not merged")
+        if args.branch == pool.base():
+            note(f"kept branch {args.branch}: it is the base branch")
+        else:
+            note(f"kept branch {args.branch}: it has commits that are not merged")
     if args.json:
         print(
             json.dumps(

@@ -146,7 +146,7 @@ ones that hold no work of their own.
 | `warmtree path <branch>` | Print the absolute path of the taken slot holding `<branch>`. Made for agents, whose harnesses reset the working directory between commands: `git -C "$(warmtree path <branch>)" status` works no matter how often that happens. Exit 1 if the branch is not in a taken slot. |
 | `warmtree remove [SLOT...] [--all] [--force]` | Delete slots, their worktree registrations, and their installed dependencies. Taken slots, waiting slots holding someone's work (a branch checked out by hand, a paused rebase or bisect, commits on the detached HEAD), and adopted slots whose folder still lives outside the pool directory need `--force`; their work is lost. |
 | `warmtree status [--json] [--du]` | Table of slots: name, state, branch, age, last warm, path. `--json` for scripts and agents. `--du` adds a SIZE column and a total, measuring what the pool costs on disk; with `--json` it adds a `du_bytes` field per slot. |
-| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, ready slots hijacked by a stray checkout, untracked directories in the pool. `--fix` applies the safe repairs. Exits 1 while any finding is left unfixed. |
+| `warmtree doctor [--fix]` | Report drift between `state.json`, git, and the filesystem: deleted directories, lost registrations, stuck warming states, waiting (ready or stale) slots hijacked by a stray checkout, untracked directories in the pool. `--fix` applies the safe repairs. Exits 1 while any finding is left unfixed. |
 
 Slot states:
 

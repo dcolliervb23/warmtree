@@ -155,6 +155,10 @@ class Slot:
     # When the slot last went back to ready. The idle clock for shrinking;
     # a fill-created slot that was never taken idles from `created`.
     released: str | None = None
+    # The commit the slot was last parked on, by fill, refresh, or release.
+    # Commits on a detached HEAD count as someone's work only past this
+    # point: the parked commit itself may later be rewritten off base.
+    parked: str | None = None
 
     @property
     def number(self) -> int:
@@ -304,7 +308,13 @@ class Pool:
                 name = _next_name(slots)
                 path = self.dir / name
                 git.worktree_add_detached(self.repo_root, path, self.base())
-                slot = Slot(name=name, path=str(path), state="warming", created=_now())
+                slot = Slot(
+                    name=name,
+                    path=str(path),
+                    state="warming",
+                    created=_now(),
+                    parked=git.rev_parse(path, "HEAD"),
+                )
                 slots.append(slot)
                 self.save_state(slots)
             # Warming can take minutes. The lock is released so take() and
@@ -391,7 +401,11 @@ class Pool:
             saw_hijack = False
             for candidate in ready:
                 if not Path(candidate.path).is_dir():
-                    continue  # doctor reports a missing folder
+                    self.log(
+                        f"{candidate.name} folder is missing; skipped "
+                        "(run warmtree doctor)"
+                    )
+                    continue
                 if self._leave_alone(candidate):
                     # Hijacked, not ours, or holding work: never claim it.
                     # A hijack was just marked taken; save that below.
@@ -459,6 +473,7 @@ class Pool:
             if refusal is not None:
                 raise PoolError(refusal)
             git.reset_to_detached(path, self.base())
+            slot.parked = git.rev_parse(path, "HEAD")
             branch_deleted = False
             # The base branch is never deleted, merged or not: a hand
             # checkout of base in a waiting slot is marked taken on it,
@@ -755,6 +770,7 @@ class Pool:
             path = Path(slot.path)
             moved = git.rev_parse(path, "HEAD") != base_commit
             git.reset_to_detached(path, base_commit)
+            slot = self._update_slot(slot.name, parked=base_commit)
             lockfiles_changed = (
                 warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
             )
@@ -859,7 +875,7 @@ class Pool:
         if operation is not None:
             self.log(f"{slot.name} has a {operation} in progress; left alone")
             return True
-        if git.head_has_unsaved_commits(path):
+        if git.head_has_unsaved_commits(path, slot.parked):
             self.log(
                 f"{slot.name} has commits on its detached HEAD that no branch "
                 "holds; left alone"

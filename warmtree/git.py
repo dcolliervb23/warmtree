@@ -209,15 +209,20 @@ def operation_in_progress(path: Path) -> str | None:
     return None
 
 
-def head_has_unsaved_commits(path: Path) -> bool:
-    """True when HEAD has commits that no branch, tag, or remote ref holds.
+def head_has_unsaved_commits(path: Path, parked: str | None) -> bool:
+    """True when HEAD has commits since `parked` that no ref holds.
 
     That is what committing on a detached HEAD leaves; moving HEAD away
-    would bury those commits in this worktree's reflog. Only HEAD is
-    checked, not the reflog: a slot's reflog keeps every branch it ever
-    held, rebased-away commits included, and none of that is at risk.
+    would bury those commits in this worktree's reflog. Only commits past
+    the parked one count: amending or rebasing base can leave the parked
+    commit itself on no branch, and that is nobody's work. Without a
+    recorded park (state from an older version) nothing counts. The reflog
+    is not consulted: a slot's keeps every branch it ever held, rebased-
+    away commits included, and none of that is at risk.
     """
-    saved = ["--branches", "--tags", "--remotes"]
+    if parked is None:
+        return False
+    saved = ["--branches", "--tags", "--remotes", parked]
     return bool(run(["rev-list", "-n", "1", "HEAD", "--not", *saved], cwd=path))
 
 

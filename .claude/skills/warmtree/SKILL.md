@@ -62,7 +62,8 @@ Decide with this rule:
 
 For scripts, `warmtree status --json` returns a list of slots with `name`,
 `path`, `state`, `branch`, `created`, `warmed`, `lockfiles`, `lease_pid`
-(the session that took it), `lease_since`, and `released`.
+(the session that took it), `lease_since`, `released`, and `parked`
+(the commit the slot was last parked on).
 
 ## 3. Take a slot
 
@@ -174,7 +175,7 @@ abandoned.
 | `slot-N was marked ready (or stale) but has <branch> checked out; marked taken instead`, or a `taken` slot in `warmtree status` that no session took | Someone checked out a branch by hand in a waiting slot; warmtree kept their work and now counts the slot as taken. | Tell the user. The slot returns to the pool with `warmtree release <branch>` once they are done with it. |
 | `slot-N is not a working tree of this repository; left alone (see warmtree doctor)` | The slot's folder was replaced by something else; warmtree will not reset or delete it. | Run `warmtree doctor` and show the user its report. The folder is someone else's: let the user decide what to do with it. |
 | `slot-N has a <rebase or bisect> in progress; left alone` or `slot-N has commits on its detached HEAD that no branch holds; left alone` | Someone is working in a waiting slot without a branch. warmtree will not reset, trim, or hand it out. | Tell the user. Never finish, abort, or discard their work to free the slot. |
-| `slot-N folder is missing; skipped (run warmtree doctor)` | The slot's folder was deleted by hand. | Run `warmtree doctor`; `--fix` drops the entry. |
+| `slot-N folder is missing; skipped (run warmtree doctor)` | The slot's folder was deleted by hand; `refresh` and `take` skip it. | Run `warmtree doctor`; `--fix` drops the entry. |
 | `<slots> holds work that removing would delete; use --force` | `remove` found someone's work in a waiting slot. | Tell the user what is there; never add `--force` on your own. |
 
 ## Quick reference
