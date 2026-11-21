@@ -30,6 +30,12 @@ def long_flags(parser: argparse.ArgumentParser) -> list[str]:
     ]
 
 
+def rows(text: str, name: str) -> str:
+    """The command's own table rows, so a mention elsewhere cannot stand in."""
+    starts = (f"| `warmtree {name} ", f"| `warmtree {name}`")
+    return "\n".join(line for line in text.splitlines() if line.startswith(starts))
+
+
 COMMANDS = commands()
 
 
@@ -50,13 +56,15 @@ def test_every_argument_has_a_real_help_line(name: str):
 
 @pytest.mark.parametrize("name", sorted(COMMANDS))
 def test_readme_documents_every_command_and_flag(name: str):
-    assert f"warmtree {name}" in README
+    row = rows(README, name)
+    assert row, f"README command table has no row for warmtree {name}"
     for flag in long_flags(COMMANDS[name]):
-        assert flag in README, f"README does not mention warmtree {name} {flag}"
+        assert flag in row, f"README row for warmtree {name} lacks {flag}"
 
 
 @pytest.mark.parametrize("name", sorted(set(COMMANDS) - SETUP_ONLY))
 def test_shipped_skill_documents_every_agent_command_and_flag(name: str):
-    assert f"warmtree {name}" in SKILL
+    row = rows(SKILL, name)
+    assert row, f"SKILL.md quick reference has no row for warmtree {name}"
     for flag in long_flags(COMMANDS[name]):
-        assert flag in SKILL, f"SKILL.md does not mention warmtree {name} {flag}"
+        assert flag in row, f"SKILL.md row for warmtree {name} lacks {flag}"
