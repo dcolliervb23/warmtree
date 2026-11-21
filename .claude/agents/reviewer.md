@@ -59,8 +59,13 @@ folders that hold people's work, so a missed case is lost work for a stranger.
 - Tests: would each new test fail on the old code? Can one pass for the wrong
   reason? Mutation-check the most important one: disable the guard it
   protects and confirm it fails.
-- Docs: do the README, both SKILL.md copies, and `--help` text agree with the
-  code?
+- Docs: is every new or changed flag, behavior, refusal, and output line
+  documented in all three places CLAUDE.md requires (`--help`, README.md,
+  the shipped SKILL.md with its guidance and troubleshooting rows)? Do they
+  agree with the code? Could an agent reading only the installed skill find
+  the capability and know when to ask the user first? A capability missing
+  from one place is a [MINOR] finding, unless the gap would lead an agent to
+  destroy work, which makes it [REAL].
 
 ## What earlier reviews here missed
 

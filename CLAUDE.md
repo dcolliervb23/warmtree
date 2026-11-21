@@ -11,6 +11,21 @@ general cleanup; the design explains why.
   stop and wait for review before committing.
 - Small commits, one step each. Conventional messages (`feat:`, `test:`, `docs:`).
   Plain messages: no co-author trailers, no session links.
+- Every user-facing capability is documented in the same PR that adds or
+  changes it, in each place a person or agent finds it:
+  - `--help`: the command's description says what it does and what it
+    refuses, every flag has its own help line, and the epilog shows the
+    common sequence when there is one.
+  - README.md, which is also the PyPI page: the command table row and any
+    walkthrough that uses the command.
+  - The shipped skill, `warmtree/skills/warmtree/SKILL.md`, which
+    `warmtree init` installs for agents. Update its quick-reference row, the
+    guidance on when to use the command and when to ask the user first, and
+    a troubleshooting row for each new message an agent will see. Keep
+    `.claude/skills/warmtree/SKILL.md` byte-identical and record the new
+    hash in `SHIPPED_SKILL_HASHES`.
+
+  A capability missing from any of these is not done.
 
 ## Review
 The author never reviews alone. Reviewers are fresh background agents briefed
