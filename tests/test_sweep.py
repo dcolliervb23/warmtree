@@ -134,3 +134,126 @@ def test_sweep_never_releases_a_replaced_slot_directory(repo: Path):
     assert item.action == "skipped"
     assert "no longer a working tree" in item.reason
     assert (foreign / "precious.txt").exists()  # untouched
+
+
+def detached_at(repo: Path, ref: str, name: str = "wt-detached") -> Path:
+    path = repo.parent / name
+    run_git("worktree", "add", "-q", "--detach", str(path), ref, cwd=repo)
+    return path
+
+
+def older_commit(repo: Path) -> str:
+    """A commit on main that is no longer its tip."""
+    first = git.rev_parse(repo, "main")
+    (repo / "later.txt").write_text("later\n")
+    run_git("add", ".", cwd=repo)
+    run_git("commit", "-q", "-m", "later", cwd=repo)
+    return first
+
+
+def test_sweep_removes_merged_detached_worktree_with_flag(repo: Path):
+    path = detached_at(repo, older_commit(repo))
+
+    [item] = Pool(repo, Config(size=0)).sweep(detached=True)
+
+    assert (item.action, item.reason) == ("removed", "detached, merged")
+    assert not path.exists()
+
+
+def test_sweep_hints_at_detached_flag_without_it(repo: Path):
+    path = detached_at(repo, older_commit(repo))
+
+    [item] = Pool(repo, Config(size=0)).sweep()
+
+    assert item.action == "kept"
+    assert item.reason == (
+        "detached HEAD, merged into base (sweep --detached removes it)"
+    )
+    assert path.exists()
+
+
+def test_sweep_keeps_unmerged_detached_worktree(repo: Path):
+    hand_made(repo, "wip", merged=False)
+    path = detached_at(repo, "wip", name="wt-val")
+
+    results = Pool(repo, Config(size=0)).sweep(detached=True)
+
+    [item] = [r for r in results if r.name == str(path)]
+    assert (item.action, item.reason) == ("kept", "detached HEAD")
+    assert path.exists()
+
+
+def test_sweep_keeps_dirty_merged_detached_worktree(repo: Path):
+    path = detached_at(repo, older_commit(repo))
+    (path / "scratch.txt").write_text("notes\n")
+
+    [item] = Pool(repo, Config(size=0)).sweep(detached=True)
+
+    assert (item.action, item.reason) == (
+        "kept",
+        "detached HEAD with uncommitted changes",
+    )
+    assert path.exists()
+
+
+def test_sweep_removes_detached_at_base_tip(repo: Path):
+    path = detached_at(repo, "main")
+
+    [item] = Pool(repo, Config(size=0)).sweep(detached=True)
+
+    assert item.action == "removed"
+    assert not path.exists()
+
+
+def test_sweep_never_touches_pool_slots(repo: Path):
+    pool = Pool(repo, Config(size=1))
+    pool.fill()
+
+    assert pool.sweep(detached=True) == []
+    assert pool.status()[0].state == "ready"
+
+
+def test_sweep_survives_a_worktree_whose_directory_vanished(repo: Path):
+    path = hand_made(repo, "ghost", merged=False)
+    shutil.rmtree(path)
+
+    results = Pool(repo, Config(size=0)).sweep()
+
+    assert all(r.action != "removed" for r in results)
+
+
+def test_sweep_detached_counts_upstream_merges_with_fetch(repo: Path, tmp_path: Path):
+    # Local main in the clone is stale; the commit is merged on origin only,
+    # so removal must measure against origin/main, not local main.
+    clone = tmp_path / "clone"
+    run_git("clone", "-q", str(repo), str(clone), cwd=tmp_path)
+    run_git("config", "user.email", "t@t", cwd=clone)
+    run_git("config", "user.name", "t", cwd=clone)
+    wt = clone.parent / "wt-upstream"
+    run_git("worktree", "add", "-q", "-b", "upstream-done", str(wt), cwd=clone)
+    (wt / "u.txt").write_text("u\n")
+    run_git("add", ".", cwd=wt)
+    run_git("commit", "-q", "-m", "u", cwd=wt)
+    run_git("push", "-q", "origin", "upstream-done", cwd=wt)
+    merge_into_main(repo, "upstream-done")  # merged on origin; clone unaware
+    val = detached_at(clone, "upstream-done", name="wt-val")
+
+    results = Pool(clone, Config(size=0)).sweep(fetch=True, detached=True)
+
+    [item] = [r for r in results if r.name == str(val)]
+    assert item.action == "removed"
+    assert not val.exists()
+
+
+def test_sweep_reports_a_failed_removal_and_continues(repo: Path, monkeypatch):
+    path = detached_at(repo, older_commit(repo))
+
+    def refuse(repo_root: Path, target: Path) -> None:
+        raise git.GitError("boom")
+
+    monkeypatch.setattr(git, "worktree_remove", refuse)
+
+    [item] = Pool(repo, Config(size=0)).sweep(detached=True)
+
+    assert (item.action, item.reason) == ("skipped", "boom")
+    assert path.exists()

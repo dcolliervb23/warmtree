@@ -87,7 +87,7 @@ class Swept:
 
     name: str  # slot name, or a worktree path
     branch: str | None
-    action: str  # released | folded | kept | skipped
+    action: str  # released | folded | removed | kept | skipped
     reason: str
 
 
@@ -441,7 +441,7 @@ class Pool:
             self.save_state(slots)
             return slot
 
-    def sweep(self, fetch: bool = False) -> list["Swept"]:
+    def sweep(self, fetch: bool = False, detached: bool = False) -> list["Swept"]:
         """Fold finished work back into the pool.
 
         Two passes with one test: a branch git certifies as merged into
@@ -451,6 +451,9 @@ class Pool:
         trees, unmerged branches, slots other live sessions hold, and
         anything that is not ours are skipped with a reason. Squash-merged
         branches are not detected: their commits are not ancestors of base.
+        A hand-made worktree parked on a detached HEAD that is an ancestor
+        of base is reported with a hint; with detached=True the clean ones
+        are removed outright — there is no branch to lose.
         """
         if fetch:
             git.fetch(self.repo_root)
@@ -482,11 +485,42 @@ class Pool:
             if path in known:
                 continue
             label = str(path)
+            if not path.is_dir():
+                continue  # registration outlived the directory
             if not git.owns_worktree(self.repo_root, path):
                 continue  # not ours to reason about
             branch = git.head_branch(path)
             if branch is None:
-                results.append(Swept(label, None, "kept", "detached HEAD"))
+                head = git.rev_parse(path, "HEAD")
+                if not git.is_ancestor(self.repo_root, head, base_ref):
+                    results.append(Swept(label, None, "kept", "detached HEAD"))
+                elif not detached:
+                    results.append(
+                        Swept(
+                            label,
+                            None,
+                            "kept",
+                            "detached HEAD, merged into base "
+                            "(sweep --detached removes it)",
+                        )
+                    )
+                elif git.is_dirty(path):
+                    results.append(
+                        Swept(
+                            label,
+                            None,
+                            "kept",
+                            "detached HEAD with uncommitted changes",
+                        )
+                    )
+                else:
+                    try:
+                        git.worktree_remove(self.repo_root, path)
+                        results.append(
+                            Swept(label, None, "removed", "detached, merged")
+                        )
+                    except git.GitError as exc:
+                        results.append(Swept(label, None, "skipped", str(exc)))
                 continue
             if not merged(branch):
                 results.append(Swept(label, branch, "kept", "not merged"))
