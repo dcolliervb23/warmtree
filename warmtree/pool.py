@@ -39,6 +39,69 @@ STATES = ("ready", "taken", "warming", "stale")
 # States refresh works on. Warming slots belong to another process.
 REFRESHABLE = ("ready", "stale")
 
+# sweep --detached leaves a worktree alone if HEAD moved this recently.
+DETACHED_IDLE_DAYS = 14
+
+# Ignored folders sweep --detached may delete: installed dependencies,
+# caches and build output, all rebuilt by an install or a build. Any other
+# ignored file, such as an .env, keeps the worktree.
+REBUILDABLE_DIRS = frozenset(
+    {
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        "dist",
+        "build",
+        "target",
+        "bin",
+        "obj",
+        "vendor",
+        ".gradle",
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+        ".parcel-cache",
+        "coverage",
+    }
+)
+
+
+def _rebuildable(ignored: str) -> bool:
+    parts = ignored.split("/")
+    return any(part in REBUILDABLE_DIRS or part.endswith(".egg-info") for part in parts)
+
+
+def _detached_blocker(path: Path) -> str | None:
+    """Why a merged, detached worktree must not be removed, or None.
+
+    Each check guards something removal would destroy beyond the commit
+    itself, which base already holds.
+    """
+    if git.is_dirty(path):
+        return "has uncommitted changes"
+    operation = git.operation_in_progress(path)
+    if operation is not None:
+        return f"a {operation} is in progress"
+    if git.has_stranded_commits(path):
+        return "has commits no branch or tag holds"
+    precious = [p for p in git.ignored_paths(path) if not _rebuildable(p)]
+    if precious:
+        named = ", ".join(precious[:3])
+        if len(precious) > 3:
+            named += f" and {len(precious) - 3} more"
+        return f"holds ignored files sweep cannot rebuild: {named}"
+    idle_seconds = datetime.now(UTC).timestamp() - git.head_moved_at(path)
+    if idle_seconds < DETACHED_IDLE_DAYS * 86400:
+        return f"was used within the last {DETACHED_IDLE_DAYS} days"
+    return None
+
 
 class PoolError(Exception):
     """A pool operation cannot proceed. The message is written for the user."""
@@ -499,6 +562,11 @@ class Pool:
                 head = git.rev_parse(path, "HEAD")
                 if not git.is_ancestor(self.repo_root, head, base_ref):
                     results.append(Swept(label, None, "kept", "detached HEAD"))
+                    continue
+                blocker = _detached_blocker(path)
+                if blocker is not None:
+                    reason = f"detached HEAD, merged, but {blocker}"
+                    results.append(Swept(label, None, "kept", reason))
                 elif not detached:
                     results.append(
                         Swept(
@@ -507,15 +575,6 @@ class Pool:
                             "kept",
                             "detached HEAD, merged into base "
                             "(sweep --detached removes it)",
-                        )
-                    )
-                elif git.is_dirty(path):
-                    results.append(
-                        Swept(
-                            label,
-                            None,
-                            "kept",
-                            "detached HEAD with uncommitted changes",
                         )
                     )
                 else:

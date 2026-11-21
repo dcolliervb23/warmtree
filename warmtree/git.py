@@ -48,12 +48,13 @@ def allow_hooks(allowed: bool) -> None:
     _hooks_allowed = allowed
 
 
-def run(args: list[str], cwd: Path) -> str:
+def run(args: list[str], cwd: Path, stdin: str | None = None) -> str:
     """Run `git <args>` in cwd and return stripped stdout."""
     prefix = [] if _hooks_allowed else ["-c", f"core.hooksPath={_no_hooks_path()}"]
     result = subprocess.run(
         ["git", *prefix, *args],
         cwd=cwd,
+        input=stdin,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -169,6 +170,69 @@ def is_ancestor(repo: Path, ref: str, of: str) -> bool:
 def is_dirty(path: Path) -> bool:
     """True when the worktree has modified, staged, or untracked files."""
     return bool(run(["status", "--porcelain"], cwd=path))
+
+
+def git_dir(path: Path) -> Path:
+    """The worktree's private git directory (.git/worktrees/<name>)."""
+    return Path(run(["rev-parse", "--absolute-git-dir"], cwd=path))
+
+
+# Files git leaves in a worktree's git directory while an operation waits
+# for the user, mapped to the operation's name.
+OPERATION_MARKERS = (
+    ("BISECT_LOG", "bisect"),
+    ("rebase-merge", "rebase"),
+    ("rebase-apply", "rebase"),
+    ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherry-pick"),
+    ("REVERT_HEAD", "revert"),
+    ("sequencer", "cherry-pick"),
+)
+
+
+def operation_in_progress(path: Path) -> str | None:
+    """Name of the git operation paused in this worktree, if any."""
+    directory = git_dir(path)
+    for marker, operation in OPERATION_MARKERS:
+        if (directory / marker).exists():
+            return operation
+    return None
+
+
+def has_stranded_commits(path: Path) -> bool:
+    """True when the worktree's HEAD history holds commits no ref reaches.
+
+    Such commits were made here and then left behind; removing the
+    worktree deletes the history that is their only anchor.
+    """
+    history = run(["reflog", "show", "--format=%H", "HEAD"], cwd=path)
+    if not history:
+        return False
+    stranded = run(
+        ["rev-list", "--stdin", "--ignore-missing", "--not", "--all"],
+        cwd=path,
+        stdin=history + "\n",
+    )
+    return bool(stranded)
+
+
+def head_moved_at(path: Path) -> float:
+    """When HEAD last moved in this worktree, as a Unix timestamp."""
+    directory = git_dir(path)
+    stamps = [
+        (directory / name).stat().st_mtime
+        for name in ("HEAD", "logs/HEAD")
+        if (directory / name).exists()
+    ]
+    return max(stamps)
+
+
+def ignored_paths(path: Path) -> list[str]:
+    """Ignored files and folders in the worktree, as git reports them."""
+    output = run(["status", "--porcelain", "-z", "--ignored=matching"], cwd=path)
+    return [
+        entry[3:].rstrip("/") for entry in output.split("\0") if entry.startswith("!! ")
+    ]
 
 
 def branch_exists(repo: Path, name: str) -> bool:
