@@ -257,3 +257,19 @@ def test_sweep_reports_a_failed_removal_and_continues(repo: Path, monkeypatch):
 
     assert (item.action, item.reason) == ("skipped", "boom")
     assert path.exists()
+
+
+def test_cli_sweep_prints_removed_and_hint(repo: Path, capsys, monkeypatch):
+    from warmtree.cli import main
+
+    detached_at(repo, older_commit(repo))
+    monkeypatch.chdir(repo)
+
+    assert main(["sweep"]) == 0
+    assert "sweep --detached removes it" in capsys.readouterr().err
+
+    assert main(["sweep", "--detached"]) == 0
+    out = capsys.readouterr().out
+    assert "removed: " in out
+    assert "(detached, merged)" in out
+    assert "removed 1" in out

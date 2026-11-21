@@ -199,7 +199,9 @@ def build_parser() -> argparse.ArgumentParser:
         "folding their folders and dependencies into the pool. Dirty trees, "
         "unmerged branches, and slots other sessions hold are skipped with "
         "a reason. Squash-merged branches are not detected: their commits "
-        "are not ancestors of base.",
+        "are not ancestors of base. With --detached, clean hand-made "
+        "worktrees parked on a detached HEAD whose commit is an ancestor "
+        "of base are removed.",
         epilog="onboarding a repo with a pile of old worktrees: "
         "warmtree init, then warmtree sweep --fetch",
     )
@@ -207,6 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch",
         action="store_true",
         help="fetch origin first, so branches merged only upstream count",
+    )
+    sweep.add_argument(
+        "--detached",
+        action="store_true",
+        help="also remove clean detached worktrees whose commit is merged into base",
     )
     sweep.set_defaults(func=cmd_sweep)
 
@@ -538,17 +545,26 @@ def cmd_adopt(args: argparse.Namespace) -> int:
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
-    results = _pool().sweep(fetch=args.fetch)
+    results = _pool().sweep(fetch=args.fetch, detached=args.detached)
     folded = 0
+    removed = 0
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
             print(f"{item.action}: {item.name} ({item.branch})")
+        elif item.action == "removed":
+            removed += 1
+            print(f"removed: {item.name} ({item.reason})")
         elif item.action == "skipped":
             note(f"skipped {item.name} ({item.branch}): {item.reason}")
+        elif item.action == "kept" and "sweep --detached" in item.reason:
+            note(f"kept {item.name}: {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
     skipped = sum(1 for item in results if item.action == "skipped")
-    print(f"swept {folded} into the pool; kept {kept} in flight; skipped {skipped}")
+    tally = f"swept {folded} into the pool"
+    if removed:
+        tally += f"; removed {removed}"
+    print(f"{tally}; kept {kept} in flight; skipped {skipped}")
     return 0
 
 
