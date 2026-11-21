@@ -179,7 +179,7 @@ abandoned.
 | `warmtree fill` | Create and warm missing slots. |
 | `warmtree refresh` | Fast-forward waiting slots and re-warm if lockfiles changed. |
 | `warmtree adopt <path>` | Register an existing hand-made worktree as a taken slot, in place. |
-| `warmtree sweep [--fetch] [--detached]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. |
+| `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
 
 `adopt` changes nothing on disk: the worktree is registered where it is,
 and the folder moves into the pool later, at release, once the branch is
