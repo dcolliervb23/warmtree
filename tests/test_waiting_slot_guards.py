@@ -145,3 +145,38 @@ def test_doctor_reports_a_stale_slot_that_is_not_our_worktree(pool: Pool, repo: 
     findings = pool.doctor()
 
     assert any("no longer a working tree" in f.problem for f in findings)
+
+
+def amend_base(repo: Path) -> None:
+    """Commit on main, park the pool there, then rewrite that commit away."""
+    (repo / "README.md").write_text("draft\n")
+    run_git("commit", "-q", "-am", "draft", cwd=repo)
+    Pool(repo, Config(size=2, base="main")).refresh()
+    (repo / "README.md").write_text("final\n")
+    run_git("commit", "-q", "--amend", "-am", "final", cwd=repo)
+
+
+def test_rewriting_the_base_tip_does_not_strand_the_pool(pool: Pool, repo: Path):
+    amend_base(repo)
+
+    pool.refresh()
+
+    tip = run_git("rev-parse", "main", cwd=repo)
+    for slot in pool.status():
+        assert run_git("rev-parse", "HEAD", cwd=Path(slot.path)) == tip
+    _, cold = pool.take("feature")
+    assert cold is False
+
+
+def test_a_slot_with_no_recorded_park_is_not_kept_for_commits(pool: Pool, repo: Path):
+    # State files from before this change have no parked commit: those
+    # slots are recycled as they always were, never frozen.
+    amend_base(repo)
+    for slot in pool.status():
+        pool._update_slot(slot.name, parked=None)
+
+    pool.refresh()
+
+    tip = run_git("rev-parse", "main", cwd=repo)
+    for slot in pool.status():
+        assert run_git("rev-parse", "HEAD", cwd=Path(slot.path)) == tip
