@@ -363,7 +363,10 @@ def build_parser() -> argparse.ArgumentParser:
         "hash changed. Also trims surplus ready slots that have sat "
         "unused longer than [pool] shrink_after (14d by default) back "
         "down to size. Runs automatically in the background per "
-        '[pool] refresh_every; both accept 30m/24h/7d forms or "off".',
+        '[pool] refresh_every; both accept 30m/24h/7d forms or "off". '
+        "Never resets or trims a waiting slot someone checked a branch out "
+        "in by hand: it is marked taken on that branch instead. A slot "
+        "folder that is no longer this repo's worktree is left alone.",
         epilog="example: a pool that tracks origin nightly, keeps 3 ready, "
         "and forgets burst slots after a week -- .warmtree.toml: "
         '[pool] size = 3, refresh_every = "24h", shrink_after = "7d"',
@@ -384,7 +387,8 @@ def build_parser() -> argparse.ArgumentParser:
         "(comments and other keys are kept) and grow or shrink the pool to "
         "match. Growing warms the new slots before returning. Shrinking "
         "removes only waiting (ready or stale) slots; taken slots never count "
-        "against size.",
+        "against size, and a waiting slot with a branch checked out by hand "
+        "is marked taken and kept.",
     )
     size.add_argument(
         "size",

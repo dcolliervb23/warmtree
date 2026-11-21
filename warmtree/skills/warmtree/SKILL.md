@@ -170,7 +170,9 @@ abandoned.
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 | ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
-| `pool refresh overdue; refreshing in the background` | A scheduled refresh started on its own. | Nothing; carry on. |
+| `pool refresh overdue; refreshing in the background` | A scheduled refresh started on its own. It never resets a slot with a branch checked out. | Nothing; carry on. |
+| `slot-N was marked ready but has <branch> checked out; marked taken instead` | Someone checked out a branch by hand in a waiting slot; warmtree kept their work and now counts the slot as taken. | Tell the user. The slot returns to the pool with `warmtree release <branch>` once they are done with it. |
+| `slot-N is not a working tree of this repository; left alone (see warmtree doctor)` | The slot's folder was replaced by something else; warmtree will not reset or delete it. | Run `warmtree doctor` and show the user its report; ask before `--fix` or `remove --force`. |
 
 ## Quick reference
 

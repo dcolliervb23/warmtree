@@ -74,3 +74,11 @@ Append here instead of expanding DESIGN.md.
   since sparse checkout marks its excluded files skip-worktree. A real fix
   would have to tell sparse-checkout's marks from hand-set ones. Revisit
   only on real demand.
+- **Edits in a detached waiting slot are still reset (known gap, left alone).**
+  `refresh` and shrinking now keep a waiting slot with a branch checked out
+  by hand. One edited while still detached, with no branch, is reset or
+  removed as before. Found by the review of #26 (2026-11). Not guarded:
+  warm commands can leave tracked files modified (an install rewriting its
+  lockfile), so a dirty detached slot does not prove someone worked there,
+  and keeping every one would stop the pool recycling. A real fix would
+  record the tree's state after warming and compare. Revisit on real demand.
