@@ -61,7 +61,8 @@ Decide with this rule:
   and their installed dependencies.
 
 For scripts, `warmtree status --json` returns a list of slots with `name`,
-`path`, `state`, `branch`, `created`, `warmed`, and `lockfiles`.
+`path`, `state`, `branch`, `created`, `warmed`, `lockfiles`, `lease_pid`
+(the session that took it), `lease_since`, and `released`.
 
 ## 3. Take a slot
 
@@ -165,6 +166,8 @@ abandoned.
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
+| ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
+| `pool refresh overdue; refreshing in the background` | A scheduled refresh started on its own. | Nothing; carry on. |
 
 ## Quick reference
 
@@ -173,13 +176,15 @@ abandoned.
 | `warmtree which` | Am I in a slot? |
 | `warmtree path <branch>` | Print the taken slot's absolute path for a branch. |
 | `warmtree size` | Configured size and counts. `warmtree size N` grows or shrinks to N. |
-| `warmtree status [--json]` | Every slot and its state. |
+| `warmtree status [--json] [--du]` | Every slot and its state; `--du` adds disk usage. |
 | `warmtree take <branch> [--from REF] [--json] [--refill-background]` | Claim a slot, print its path (or JSON). |
 | `warmtree take --scratch` | Claim a slot on a generated throwaway branch. |
 | `warmtree exec <branch> -- <command...>` | Run one command inside that branch's slot. |
 | `warmtree release <branch> [--keep-branch] [--force] [--json]` | Return a slot. |
 | `warmtree fill` | Create and warm missing slots. |
-| `warmtree refresh` | Fast-forward waiting slots and re-warm if lockfiles changed. |
+| `warmtree refresh [--fetch]` | Move waiting slots to base (`origin/<base>` with `--fetch`), re-warm where lockfiles changed, trim long-idle surplus. |
+| `warmtree doctor [--fix]` | Report drift between pool state, git, and disk; `--fix` applies the safe repairs. |
+| `warmtree remove <slot...> [--all] [--force]` | Delete slots and their dependencies. Only when the user asks. |
 | `warmtree adopt <path>` | Register an existing hand-made worktree as a taken slot, in place. |
 | `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
 
