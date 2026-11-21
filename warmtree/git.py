@@ -209,6 +209,18 @@ def operation_in_progress(path: Path) -> str | None:
     return None
 
 
+def head_has_unsaved_commits(path: Path) -> bool:
+    """True when HEAD has commits that no branch, tag, or remote ref holds.
+
+    That is what committing on a detached HEAD leaves; moving HEAD away
+    would bury those commits in this worktree's reflog. Only HEAD is
+    checked, not the reflog: a slot's reflog keeps every branch it ever
+    held, rebased-away commits included, and none of that is at risk.
+    """
+    saved = ["--branches", "--tags", "--remotes"]
+    return bool(run(["rev-list", "-n", "1", "HEAD", "--not", *saved], cwd=path))
+
+
 def has_stranded_commits(repo: Path, path: Path) -> bool:
     """True when this worktree holds commits no surviving ref reaches.
 
