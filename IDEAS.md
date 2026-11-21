@@ -64,3 +64,13 @@ Append here instead of expanding DESIGN.md.
   needs a full re-warm anyway and remove-plus-fill lands in the same place.
   Do not teach `adopt` a branchless path; taken slots keep their branch
   invariant. Revisit only on real demand.
+- **Hidden edits are invisible to `sweep --detached` (known gap, left alone).**
+  An edit to a tracked file hidden with `git update-index --skip-worktree`
+  or `--assume-unchanged` does not show in `git status`, so a merged, idle
+  detached worktree holding one looks clean and is removed with the edit.
+  Found by the adversarial review of #24 (2026-11). Not guarded: hiding a
+  change from git is deliberate, and the obvious check (any `S` or
+  lowercase entry in `git ls-files -v`) would keep every sparse checkout,
+  since sparse checkout marks its excluded files skip-worktree. A real fix
+  would have to tell sparse-checkout's marks from hand-set ones. Revisit
+  only on real demand.
