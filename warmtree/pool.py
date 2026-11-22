@@ -155,6 +155,10 @@ class Slot:
     # When the slot last went back to ready. The idle clock for shrinking;
     # a fill-created slot that was never taken idles from `created`.
     released: str | None = None
+    # The commit the slot was last parked on, by fill, refresh, or release.
+    # Commits on a detached HEAD count as someone's work only past this
+    # point: the parked commit itself may later be rewritten off base.
+    parked: str | None = None
 
     @property
     def number(self) -> int:
@@ -304,7 +308,13 @@ class Pool:
                 name = _next_name(slots)
                 path = self.dir / name
                 git.worktree_add_detached(self.repo_root, path, self.base())
-                slot = Slot(name=name, path=str(path), state="warming", created=_now())
+                slot = Slot(
+                    name=name,
+                    path=str(path),
+                    state="warming",
+                    created=_now(),
+                    parked=git.rev_parse(path, "HEAD"),
+                )
                 slots.append(slot)
                 self.save_state(slots)
             # Warming can take minutes. The lock is released so take() and
@@ -390,26 +400,19 @@ class Pool:
             claimed = None
             saw_hijack = False
             for candidate in ready:
-                cpath = Path(candidate.path)
-                if not git.owns_worktree(self.repo_root, cpath):
-                    # Not our worktree any more; never claim it, never
-                    # record its branch. Doctor reports it.
+                if not Path(candidate.path).is_dir():
                     self.log(
-                        f"{candidate.name} is not a working tree of this "
-                        "repository; skipping it"
+                        f"{candidate.name} folder is missing; skipped "
+                        "(run warmtree doctor)"
                     )
                     continue
-                head = git.head_branch(cpath)
-                if head is None:
-                    claimed = candidate
-                    break
-                candidate.state = "taken"
-                candidate.branch = head
-                saw_hijack = True
-                self.log(
-                    f"{candidate.name} was marked ready but has {head} "
-                    "checked out; marked taken instead"
-                )
+                if self._leave_alone(candidate):
+                    # Hijacked, not ours, or holding work: never claim it.
+                    # A hijack was just marked taken; save that below.
+                    saw_hijack = True
+                    continue
+                claimed = candidate
+                break
             if saw_hijack:
                 # Persist the observation now: a failure in the checkout
                 # below must not lose what git told us about these slots.
@@ -470,8 +473,12 @@ class Pool:
             if refusal is not None:
                 raise PoolError(refusal)
             git.reset_to_detached(path, self.base())
+            slot.parked = git.rev_parse(path, "HEAD")
             branch_deleted = False
-            if not keep_branch:
+            # The base branch is never deleted, merged or not: a hand
+            # checkout of base in a waiting slot is marked taken on it,
+            # and releasing that must not take local base with it.
+            if not keep_branch and branch != self.base():
                 branch_deleted = git.branch_delete(self.repo_root, branch)
             # An adopted slot graduates into the pool directory now, not at
             # adoption: with the branch done, the tree reset, and the lease
@@ -747,6 +754,14 @@ class Pool:
                 slot = _find(slots, name)
                 if slot.state not in REFRESHABLE:
                     continue  # taken since we looked
+                if not Path(slot.path).is_dir():
+                    self.log(
+                        f"{slot.name} folder is missing; skipped (run warmtree doctor)"
+                    )
+                    continue
+                if self._leave_alone(slot):
+                    self.save_state(slots)
+                    continue
                 was_stale = slot.state == "stale"
                 slot.state = "warming"
                 self.save_state(slots)
@@ -755,6 +770,7 @@ class Pool:
             path = Path(slot.path)
             moved = git.rev_parse(path, "HEAD") != base_commit
             git.reset_to_detached(path, base_commit)
+            slot = self._update_slot(slot.name, parked=base_commit)
             lockfiles_changed = (
                 warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
             )
@@ -785,11 +801,18 @@ class Pool:
         cutoff = datetime.now(UTC).timestamp() - window
         with self.locked():
             slots = self.load_state()
-            all_ready = [slot for slot in slots if slot.state == "ready"]
-            removable = [slot for slot in all_ready if self._at_home(slot)]
+            if sum(slot.state == "ready" for slot in slots) <= self.config.size:
+                return
+            kept = self._leave_alone_all(slots)
             # The floor guards READY slots specifically: warming and stale
             # slots may never make it back, so they earn no credit toward
             # size, or trimming could leave fewer ready than configured.
+            all_ready = [
+                slot
+                for slot in slots
+                if slot.state == "ready" and slot.name not in kept
+            ]
+            removable = [slot for slot in all_ready if self._at_home(slot)]
             surplus = len(all_ready) - self.config.size
             if surplus <= 0:
                 return
@@ -815,6 +838,68 @@ class Pool:
                     f"pool heading back to {self.config.size} ready"
                 )
 
+    def _leave_alone(self, slot: Slot) -> bool:
+        """Whether a waiting slot holds something a reset or delete would lose.
+
+        A branch checked out by hand in a parked slot means someone is
+        working there: the slot is marked taken on that branch, as `take`
+        does, so release can recycle it later. A paused rebase or bisect,
+        or commits on the detached HEAD, keep the slot as it is. A folder
+        that is no longer our worktree belongs to someone else, and git run
+        inside it can act on whatever repository contains it: it is left
+        for doctor to report. A missing folder has nothing to lose. The
+        caller holds the lock and saves state.
+        """
+        path = Path(slot.path)
+        if not path.is_dir():
+            return False
+        if not git.owns_worktree(self.repo_root, path):
+            self.log(
+                f"{slot.name} is not a working tree of this repository; "
+                "left alone (see warmtree doctor)"
+            )
+            return True
+        head = git.head_branch(path)
+        if head is not None:
+            self.log(
+                f"{slot.name} was marked {slot.state} but has {head} checked "
+                "out; marked taken instead"
+            )
+            slot.state = "taken"
+            slot.branch = head
+            return True
+        # A detached HEAD is the parked state, but two things on one are
+        # certainly someone's work: a paused operation (a rebase or bisect
+        # detaches HEAD) and commits made there that no branch holds.
+        operation = git.operation_in_progress(path)
+        if operation is not None:
+            self.log(f"{slot.name} has a {operation} in progress; left alone")
+            return True
+        if git.head_has_unsaved_commits(path, slot.parked):
+            self.log(
+                f"{slot.name} has commits on its detached HEAD that no branch "
+                "holds; left alone"
+            )
+            return True
+        return False
+
+    def _leave_alone_all(self, slots: list[Slot]) -> set[str]:
+        """Check every waiting slot, save what changed, name the ones kept.
+
+        A slot just marked taken is no longer waiting, so it is not named.
+        """
+        kept = set()
+        changed = False
+        for slot in slots:
+            if slot.state in REFRESHABLE and self._leave_alone(slot):
+                if slot.state == "taken":
+                    changed = True
+                else:
+                    kept.add(slot.name)
+        if changed:
+            self.save_state(slots)
+        return kept
+
     def _at_home(self, slot: Slot) -> bool:
         """Whether the slot's folder lives in the pool directory."""
         return Path(slot.path).resolve() == (self.dir / slot.name).resolve()
@@ -829,12 +914,15 @@ class Pool:
         """
         with self.locked():
             slots = self.load_state()
-            surplus = _waiting(slots) - self.config.size
+            kept = self._leave_alone_all(slots)
+            surplus = _waiting(slots) - len(kept) - self.config.size
             candidates = sorted(
                 (
                     slot
                     for slot in slots
-                    if slot.state in REFRESHABLE and self._at_home(slot)
+                    if slot.state in REFRESHABLE
+                    and slot.name not in kept
+                    and self._at_home(slot)
                 ),
                 key=lambda slot: slot.number,
                 reverse=True,
@@ -863,6 +951,21 @@ class Pool:
                 missing = wanted - {slot.name for slot in targets}
                 if missing:
                     raise PoolError(f"no such slot: {', '.join(sorted(missing))}")
+            held = [
+                slot
+                for slot in targets
+                if slot.state in REFRESHABLE
+                and Path(slot.path).is_dir()
+                and self._leave_alone(slot)
+            ]
+            if held:
+                self.save_state(slots)  # keep what was learned, even on refusal
+            kept = [slot.name for slot in held if slot.state != "taken"]
+            if kept and not force:
+                raise PoolError(
+                    f"{', '.join(kept)} holds work that removing would "
+                    "delete; use --force"
+                )
             taken = [slot.name for slot in targets if slot.state == "taken"]
             if taken and not force:
                 raise PoolError(
@@ -960,7 +1063,7 @@ class Pool:
                 # recording its branch would let release reset it later.
                 # Registration is not enough — git keeps listing a replaced
                 # path — so ownership is checked through the shared git dir.
-                if slot.state == "ready" and not git.owns_worktree(
+                if slot.state in REFRESHABLE and not git.owns_worktree(
                     self.repo_root, path
                 ):
                     findings.append(
@@ -972,8 +1075,9 @@ class Pool:
                             "and `warmtree fill`",
                         )
                     )
-                elif slot.state == "ready":
+                elif slot.state in REFRESHABLE:
                     head = git.head_branch(path)
+                    was = slot.state
                     if head is not None:
                         # Someone checked a branch out in a parked slot
                         # behind warmtree's back. Marking it taken keeps
@@ -985,7 +1089,7 @@ class Pool:
                         findings.append(
                             Finding(
                                 slot.name,
-                                f"marked ready but has {head} checked out",
+                                f"marked {was} but has {head} checked out",
                                 fixed=fix,
                                 hint=""
                                 if fix
