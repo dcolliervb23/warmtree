@@ -82,13 +82,29 @@ def note(message: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="warmtree", description="A pool of pre-warmed git worktrees."
+        prog="warmtree",
+        description="A pool of pre-warmed git worktrees: take one for a branch "
+        "in under a second, release it when the branch is done.",
+        epilog="start a repo with warmtree init, then warmtree fill. Agents: "
+        "begin branch work with warmtree which. Run warmtree <command> -h for "
+        "details. Set WARMTREE_AUTO_REFRESH=off to stop background refreshes.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    init = commands.add_parser("init", help=f"write a starter {CONFIG_NAME}")
-    init.add_argument("--force", action="store_true", help="overwrite an existing file")
+    init = commands.add_parser(
+        "init",
+        help=f"write a starter {CONFIG_NAME}",
+        description=f"Write a starter {CONFIG_NAME} at the repo root, with "
+        "lockfiles pre-filled from what the repo has. It suggests an install "
+        "command but never writes one. Also installs the agent skill for each "
+        "coding agent it detects in the repo, and adds the prefer-warmtree "
+        "block to your user-level agent instructions.",
+        epilog="next: edit [warm] run to add your install command, then warmtree fill",
+    )
+    init.add_argument(
+        "--force", action="store_true", help=f"overwrite an existing {CONFIG_NAME}"
+    )
     init_skill = init.add_mutually_exclusive_group()
     init_skill.add_argument(
         "--no-skill", action="store_true", help="do not install the agent skill"
@@ -108,7 +124,14 @@ def build_parser() -> argparse.ArgumentParser:
     init.set_defaults(func=cmd_init)
 
     skill_cmd = commands.add_parser(
-        "skill", help="install the agent skill where this repo's coding agents look"
+        "skill",
+        help="install the agent skill where this repo's coding agents look",
+        description="Install or refresh the warmtree skill (SKILL.md) where "
+        "each coding agent this repo uses reads skills: .claude/skills, "
+        ".github/skills, .agents/skills, or .cursor/skills. With --user, "
+        "install into each tool's personal skills folder in your home "
+        "directory instead; that works outside any repo. A copy you edited "
+        "is kept unless --force.",
     )
     skill_cmd.add_argument(
         "--tool",
@@ -130,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
     instructions = commands.add_parser(
         "instructions",
         help="add a prefer-warmtree block to agent instruction files",
+        description="Add or refresh a marked block telling agents to prefer "
+        "warmtree over git worktree add. It goes in your user-level "
+        "instruction files by default (~/.claude/CLAUDE.md, "
+        "~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), or in this "
+        "repo's with --repo. Only the marked block is ever changed.",
     )
     instructions.add_argument(
         "--repo",
@@ -146,10 +174,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     instructions.set_defaults(func=cmd_instructions)
 
-    fill = commands.add_parser("fill", help="create any missing slots")
+    fill = commands.add_parser(
+        "fill",
+        help="create and warm slots until size are waiting",
+        description="Create slots until [pool] size are waiting (ready, "
+        "warming, or stale; taken slots do not count). Each is a "
+        "worktree on a detached HEAD at base, with [warm] copy files copied "
+        "in and [warm] run commands executed. Warns when run is empty but "
+        "the repo has a lockfile warmtree recognizes.",
+    )
     fill.set_defaults(func=cmd_fill)
 
-    take = commands.add_parser("take", help="claim a ready slot for a branch")
+    take = commands.add_parser(
+        "take",
+        help="claim a ready slot for a branch",
+        description="Claim the most recently used ready slot and check out "
+        "BRANCH in it: the local branch if it exists; else, without --from, "
+        "origin's (created to track it); else a new branch from --from or base. "
+        "--from wins over origin: the new branch starts at REF and tracks "
+        "nothing. Prints only the "
+        "slot's path on stdout; notes go to stderr. With no ready slot it "
+        "falls back to a normal git worktree add and says so. Taking a branch "
+        "that is already in a taken slot prints that slot's path again. "
+        "Refills the pool afterwards.",
+        epilog='bash/zsh: cd "$(warmtree take BRANCH)". Agents: keep the path, '
+        "or print it again later with warmtree path BRANCH.",
+    )
     take.add_argument(
         "branch", nargs="?", help="branch to create or check out in the slot"
     )
@@ -159,14 +209,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="claim a slot on a generated scratch/<id> branch, for throwaway "
         "work that does not deserve a name",
     )
-    take.add_argument("--from", dest="from_ref", metavar="REF", help="start point")
+    take.add_argument(
+        "--from",
+        dest="from_ref",
+        metavar="REF",
+        help="start a new branch at REF instead of base; ignored when the "
+        "branch already exists locally, and used instead of origin's branch "
+        "of the same name",
+    )
     take.add_argument(
         "--json",
         action="store_true",
         help="print a JSON object (path, slot, branch, cold) instead of the path",
     )
     refill = take.add_mutually_exclusive_group()
-    refill.add_argument("--no-refill", action="store_true", help="do not refill")
+    refill.add_argument(
+        "--no-refill",
+        action="store_true",
+        help="do not refill the pool afterwards; refill once later with warmtree fill",
+    )
     refill.add_argument(
         "--refill-background",
         action="store_true",
@@ -174,10 +235,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     take.set_defaults(func=cmd_take)
 
-    release = commands.add_parser("release", help="return a slot to the pool")
+    release = commands.add_parser(
+        "release",
+        help="return a slot to the pool",
+        description="Park the slot holding BRANCH back on base with a "
+        "detached HEAD and mark it ready, keeping its installed dependencies. "
+        "Refuses a dirty tree, and a slot another still-running session took, "
+        "unless --force. Deletes the branch only if it is merged; an unmerged "
+        "branch is always kept. An adopted worktree's folder moves into the "
+        "pool now.",
+    )
     release.add_argument("branch", help="branch currently checked out in the slot")
-    release.add_argument("--keep-branch", action="store_true", help="keep the ref")
-    release.add_argument("--force", action="store_true", help="discard changes")
+    release.add_argument(
+        "--keep-branch",
+        action="store_true",
+        help="keep the branch even if it is merged",
+    )
+    release.add_argument(
+        "--force",
+        action="store_true",
+        help="discard uncommitted changes and override another live "
+        "session's claim on the slot",
+    )
     release.add_argument(
         "--json",
         action="store_true",
@@ -186,7 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     release.set_defaults(func=cmd_release)
 
     adopt = commands.add_parser(
-        "adopt", help="move an existing worktree into the pool as a taken slot"
+        "adopt",
+        help="register an existing worktree as a taken slot, in place",
+        description="Register a hand-made worktree of this repo as a taken "
+        "slot. Nothing on disk moves or changes, so open editors, servers, "
+        "and shells keep working. The folder moves into the pool at release, "
+        "once the branch is done. Refuses the main worktree, a worktree on a "
+        "detached HEAD, one that is already a slot, and worktrees of other "
+        "repos. Prints the slot's path.",
+        epilog="many old worktrees at once: warmtree sweep --dry-run",
     )
     adopt.add_argument("path", help="path of the worktree to adopt")
     adopt.set_defaults(func=cmd_adopt)
@@ -230,7 +317,14 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.set_defaults(func=cmd_sweep)
 
     exec_cmd = commands.add_parser(
-        "exec", help="run a command inside the slot holding a branch"
+        "exec",
+        help="run a command inside the slot holding a branch",
+        description="Run COMMAND inside the taken slot holding BRANCH, with "
+        "WARMTREE_SLOT set to the slot number. Output streams through and "
+        "the exit code is the command's (127 when it is not found, 126 when "
+        "it is not executable). The command does not pin the slot: do not "
+        "release the branch while it is still running.",
+        epilog="example: warmtree exec fix/tests -- npm test",
     )
     exec_cmd.add_argument("branch", help="branch whose slot to run in")
     exec_cmd.add_argument(
@@ -240,10 +334,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     exec_cmd.set_defaults(func=cmd_exec)
 
-    remove = commands.add_parser("remove", help="delete slots")
-    remove.add_argument("names", nargs="*", metavar="SLOT", help="slots to delete")
+    remove = commands.add_parser(
+        "remove",
+        help="delete slots",
+        description="Delete the named slots, or every slot with --all, with "
+        "their worktree registrations and installed dependencies. Taken "
+        "slots, and adopted slots whose folder still lives outside the pool "
+        "directory, are refused without --force.",
+    )
+    remove.add_argument(
+        "names", nargs="*", metavar="SLOT", help="slots to delete, e.g. slot-3"
+    )
     remove.add_argument("--all", action="store_true", help="delete every slot")
-    remove.add_argument("--force", action="store_true", help="delete taken slots too")
+    remove.add_argument(
+        "--force",
+        action="store_true",
+        help="also delete taken slots, and adopted folders outside the pool "
+        "directory; their uncommitted work is lost",
+    )
     remove.set_defaults(func=cmd_remove)
 
     refresh = commands.add_parser(
@@ -268,14 +376,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     refresh.set_defaults(func=cmd_refresh)
 
-    size = commands.add_parser("size", help="show or change how many slots to keep")
+    size = commands.add_parser(
+        "size",
+        help="show or change how many slots to keep",
+        description="With no argument, print the configured size and a count "
+        f"of slots by state. With N, write size = N into {CONFIG_NAME} "
+        "(comments and other keys are kept) and grow or shrink the pool to "
+        "match. Growing warms the new slots before returning. Shrinking "
+        "removes only waiting (ready or stale) slots; taken slots never count "
+        "against size.",
+    )
     size.add_argument(
-        "size", nargs="?", type=int, help="new size; grows or shrinks the pool to match"
+        "size",
+        nargs="?",
+        type=int,
+        metavar="N",
+        help="new size; grows or shrinks the pool to match",
     )
     size.set_defaults(func=cmd_size)
 
     which = commands.add_parser(
-        "which", help="name the slot the current directory is in"
+        "which",
+        help="name the slot the current directory is in",
+        description="If the current directory is inside a slot, print "
+        "'slot-N <state> <branch>' and exit 0. Otherwise print 'not inside a "
+        "warmtree slot' on stderr and exit 1.",
     )
     which.set_defaults(func=cmd_which)
 
@@ -292,17 +417,40 @@ def build_parser() -> argparse.ArgumentParser:
     path_cmd.add_argument("branch", help="branch to look up")
     path_cmd.set_defaults(func=cmd_path)
 
-    status = commands.add_parser("status", help="show every slot")
-    status.add_argument("--json", action="store_true", help="print JSON for agents")
+    status = commands.add_parser(
+        "status",
+        help="show every slot",
+        description="Print a table of every slot: name, state, branch, age, "
+        "last warm, and path. States: ready (warm, free to take), taken (a "
+        "branch is checked out), warming (run commands executing), stale "
+        "(the last warm failed; refresh retries it).",
+    )
     status.add_argument(
-        "--du", action="store_true", help="measure and show disk usage per slot"
+        "--json",
+        action="store_true",
+        help="print a JSON list of slots for scripts and agents (name, path, "
+        "state, branch, created, warmed, lockfiles, lease_pid, lease_since, "
+        "released)",
+    )
+    status.add_argument(
+        "--du",
+        action="store_true",
+        help="measure disk usage per slot and in total; adds du_bytes to --json",
     )
     status.set_defaults(func=cmd_status)
 
     doctor = commands.add_parser(
-        "doctor", help="check the pool for drift between state, git, and disk"
+        "doctor",
+        help="check the pool for drift between state, git, and disk",
+        description="Report drift between the pool's state.json, git, and "
+        "the filesystem: slot directories that are gone or replaced, lost "
+        "worktree registrations, slots stuck warming, ready slots with a "
+        "branch checked out, and stray directories in the pool. Exits 1 "
+        "while any finding is left unfixed.",
     )
-    doctor.add_argument("--fix", action="store_true", help="apply the safe repairs")
+    doctor.add_argument(
+        "--fix", action="store_true", help="apply the safe repairs and say which"
+    )
     doctor.set_defaults(func=cmd_doctor)
 
     return parser
