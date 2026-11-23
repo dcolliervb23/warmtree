@@ -168,15 +168,39 @@ def test_rewriting_the_base_tip_does_not_strand_the_pool(pool: Pool, repo: Path)
     assert cold is False
 
 
-def test_a_slot_with_no_recorded_park_is_not_kept_for_commits(pool: Pool, repo: Path):
-    # State files from before this change have no parked commit: those
-    # slots are recycled as they always were, never frozen.
+def test_a_detached_commit_is_kept_after_the_base_tip_was_rewritten(
+    pool: Pool, repo: Path
+):
     amend_base(repo)
-    for slot in pool.status():
-        pool._update_slot(slot.name, parked=None)
+    pool.refresh()
+    path, commit = detached_commit(pool.status()[0].path)
 
     pool.refresh()
 
-    tip = run_git("rev-parse", "main", cwd=repo)
-    for slot in pool.status():
-        assert run_git("rev-parse", "HEAD", cwd=Path(slot.path)) == tip
+    assert run_git("rev-parse", "HEAD", cwd=path) == commit
+
+
+def test_a_slot_with_no_recorded_park_still_keeps_a_detached_commit(pool: Pool):
+    # State files from v0.9.0 have no parked commit; their slots must keep
+    # the guard, not lose it.
+    first = pool.status()[0]
+    pool._update_slot(first.name, parked=None)
+    path, commit = detached_commit(first.path)
+
+    pool.refresh()
+
+    assert run_git("rev-parse", "HEAD", cwd=path) == commit
+
+
+def test_a_pruned_parked_commit_does_not_abort_the_pool(pool: Pool):
+    # gc can prune a parked commit that was rewritten off base.
+    [first, second] = pool.status()
+    pool._update_slot(first.name, parked="0" * 40)
+    path, commit = detached_commit(second.path)
+    pool._update_slot(second.name, parked="0" * 40)
+
+    pool.refresh()
+    _, cold = pool.take("feature")
+
+    assert cold is False
+    assert run_git("rev-parse", "HEAD", cwd=path) == commit
