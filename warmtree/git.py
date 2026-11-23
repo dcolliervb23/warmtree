@@ -215,14 +215,16 @@ def head_has_unsaved_commits(path: Path, parked: str | None) -> bool:
     That is what committing on a detached HEAD leaves; moving HEAD away
     would bury those commits in this worktree's reflog. Only commits past
     the parked one count: amending or rebasing base can leave the parked
-    commit itself on no branch, and that is nobody's work. Without a
-    recorded park (state from an older version) nothing counts. The reflog
-    is not consulted: a slot's keeps every branch it ever held, rebased-
-    away commits included, and none of that is at risk.
+    commit itself on no branch, and that is nobody's work. Without a usable
+    park (state from an older version, or a parked commit gc pruned) every
+    commit no ref holds counts: at worst the slot is kept when it holds
+    nothing, never reset when it holds work. The reflog is not consulted:
+    a slot's keeps every branch it ever held, rebased-away commits
+    included, and none of that is at risk.
     """
-    if parked is None:
-        return False
-    saved = ["--branches", "--tags", "--remotes", parked]
+    saved = ["--branches", "--tags", "--remotes"]
+    if parked is not None and ref_exists(path, parked):
+        saved.append(parked)
     return bool(run(["rev-list", "-n", "1", "HEAD", "--not", *saved], cwd=path))
 
 
