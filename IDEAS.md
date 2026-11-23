@@ -91,3 +91,10 @@ Append here instead of expanding DESIGN.md.
   and keeps the pool one short. Found by the review of #27 (2026-11). The
   folder itself is never harmed. A fix would let `doctor --fix` drop such an
   entry without touching the folder. Revisit on real demand.
+- **Downgrading after an upgrade crashes on state (known gap).** v0.9.0's
+  `Slot.from_dict` passes every key to the dataclass, so once a newer
+  version writes a field it lacks (`parked`), v0.9.0 fails with TypeError on
+  every command that reads state. This bites anyone running two installed
+  versions against one pool. Found by the third review of #27 (2026-11).
+  A fix going forward: have `from_dict` ignore unknown keys. Nothing can
+  repair the versions already released.
