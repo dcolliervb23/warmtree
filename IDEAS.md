@@ -74,3 +74,27 @@ Append here instead of expanding DESIGN.md.
   since sparse checkout marks its excluded files skip-worktree. A real fix
   would have to tell sparse-checkout's marks from hand-set ones. Revisit
   only on real demand.
+- **Uncommitted edits in a detached waiting slot are still reset (known gap,
+  left alone).** `refresh`, shrinking, and `remove` keep a waiting slot with
+  a branch checked out by hand, a paused rebase or bisect, or commits on its
+  detached HEAD. A slot edited while still detached, with nothing committed
+  and no operation paused, is reset or removed as before. Found by the
+  reviews of #26 and #27 (2026-11). Not guarded:
+  warm commands can leave tracked files modified (an install rewriting its
+  lockfile), so a dirty detached slot does not prove someone worked there,
+  and keeping every one would stop the pool recycling. A real fix would
+  record the tree's state after warming and compare. Revisit on real demand.
+- **A slot replaced by another folder cannot be dropped from state (known
+  gap).** When a slot's folder is replaced by something that is not our
+  worktree, `remove --force` fails because git refuses to remove it, and
+  `doctor` only reports it. The entry stays in state, counts toward `size`,
+  and keeps the pool one short. Found by the review of #27 (2026-11). The
+  folder itself is never harmed. A fix would let `doctor --fix` drop such an
+  entry without touching the folder. Revisit on real demand.
+- **Downgrading after an upgrade crashes on state (known gap).** v0.9.0's
+  `Slot.from_dict` passes every key to the dataclass, so once a newer
+  version writes a field it lacks (`parked`), v0.9.0 fails with TypeError on
+  every command that reads state. This bites anyone running two installed
+  versions against one pool. Found by the third review of #27 (2026-11).
+  A fix going forward: have `from_dict` ignore unknown keys. Nothing can
+  repair the versions already released.

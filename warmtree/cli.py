@@ -242,8 +242,8 @@ def build_parser() -> argparse.ArgumentParser:
         "detached HEAD and mark it ready, keeping its installed dependencies. "
         "Refuses a dirty tree, and a slot another still-running session took, "
         "unless --force. Deletes the branch only if it is merged; an unmerged "
-        "branch is always kept. An adopted worktree's folder moves into the "
-        "pool now.",
+        "branch, and the base branch, are always kept. An adopted worktree's "
+        "folder moves into the pool now.",
     )
     release.add_argument("branch", help="branch currently checked out in the slot")
     release.add_argument(
@@ -340,7 +340,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Delete the named slots, or every slot with --all, with "
         "their worktree registrations and installed dependencies. Taken "
         "slots, and adopted slots whose folder still lives outside the pool "
-        "directory, are refused without --force.",
+        "directory, are refused without --force. So is a waiting slot "
+        "holding someone's work: a branch checked out by hand (it is marked "
+        "taken), a paused rebase or bisect, or commits on its detached HEAD.",
     )
     remove.add_argument(
         "names", nargs="*", metavar="SLOT", help="slots to delete, e.g. slot-3"
@@ -349,8 +351,8 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument(
         "--force",
         action="store_true",
-        help="also delete taken slots, and adopted folders outside the pool "
-        "directory; their uncommitted work is lost",
+        help="also delete taken slots, waiting slots holding work, and adopted "
+        "folders outside the pool directory; their work is lost",
     )
     remove.set_defaults(func=cmd_remove)
 
@@ -363,7 +365,12 @@ def build_parser() -> argparse.ArgumentParser:
         "hash changed. Also trims surplus ready slots that have sat "
         "unused longer than [pool] shrink_after (14d by default) back "
         "down to size. Runs automatically in the background per "
-        '[pool] refresh_every; both accept 30m/24h/7d forms or "off".',
+        '[pool] refresh_every; both accept 30m/24h/7d forms or "off". '
+        "Never resets or trims a waiting slot holding someone's work: one "
+        "with a branch checked out by hand is marked taken on that branch, "
+        "and one with a paused rebase or bisect, or commits on its detached "
+        "HEAD, is left alone. So is a slot folder that is no longer this "
+        "repo's worktree, and a missing one is skipped for doctor.",
         epilog="example: a pool that tracks origin nightly, keeps 3 ready, "
         "and forgets burst slots after a week -- .warmtree.toml: "
         '[pool] size = 3, refresh_every = "24h", shrink_after = "7d"',
@@ -384,7 +391,8 @@ def build_parser() -> argparse.ArgumentParser:
         "(comments and other keys are kept) and grow or shrink the pool to "
         "match. Growing warms the new slots before returning. Shrinking "
         "removes only waiting (ready or stale) slots; taken slots never count "
-        "against size.",
+        "against size, and a waiting slot holding someone's work is kept, as "
+        "refresh keeps it.",
     )
     size.add_argument(
         "size",
@@ -430,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print a JSON list of slots for scripts and agents (name, path, "
         "state, branch, created, warmed, lockfiles, lease_pid, lease_since, "
-        "released)",
+        "released, parked)",
     )
     status.add_argument(
         "--du",
@@ -444,9 +452,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="check the pool for drift between state, git, and disk",
         description="Report drift between the pool's state.json, git, and "
         "the filesystem: slot directories that are gone or replaced, lost "
-        "worktree registrations, slots stuck warming, ready slots with a "
-        "branch checked out, and stray directories in the pool. Exits 1 "
-        "while any finding is left unfixed.",
+        "worktree registrations, slots stuck warming, waiting (ready or "
+        "stale) slots with a branch checked out, and stray directories in "
+        "the pool. Exits 1 while any finding is left unfixed.",
     )
     doctor.add_argument(
         "--fix", action="store_true", help="apply the safe repairs and say which"
@@ -673,11 +681,15 @@ def cmd_take(args: argparse.Namespace) -> int:
 
 
 def cmd_release(args: argparse.Namespace) -> int:
-    slot, branch_deleted = _pool().release(
+    pool = _pool()
+    slot, branch_deleted = pool.release(
         args.branch, keep_branch=args.keep_branch, force=args.force
     )
     if not branch_deleted and not args.keep_branch:
-        note(f"kept branch {args.branch}: it has commits that are not merged")
+        if args.branch == pool.base():
+            note(f"kept branch {args.branch}: it is the base branch")
+        else:
+            note(f"kept branch {args.branch}: it has commits that are not merged")
     if args.json:
         print(
             json.dumps(
