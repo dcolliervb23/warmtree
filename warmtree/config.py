@@ -116,7 +116,7 @@ def _check_copy_entry(entry: str) -> None:
     Either would make warmtree write outside the slot it is warming.
     """
     for flavour in (PurePosixPath(entry), PureWindowsPath(entry)):
-        if flavour.is_absolute() or flavour.drive or ".." in flavour.parts:
+        if flavour.anchor or ".." in flavour.parts:
             raise ConfigError(
                 f"[warm] copy entries must be paths inside the repo: {entry!r}"
             )

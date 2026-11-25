@@ -119,6 +119,7 @@ def test_copy_entries_must_stay_inside_the_repo(entry: str):
         config.parse(f'[warm]\ncopy = ["{entry}"]\n')
 
 
-def test_a_windows_absolute_copy_entry_is_an_error():
+@pytest.mark.parametrize("entry", ["C:/Users/me/.env", "\\\\shared\\\\.env"])
+def test_a_windows_absolute_copy_entry_is_an_error(entry: str):
     with pytest.raises(ConfigError, match="copy"):
-        config.parse('[warm]\ncopy = ["C:/Users/me/.env"]\n')
+        config.parse(f'[warm]\ncopy = ["{entry}"]\n')
