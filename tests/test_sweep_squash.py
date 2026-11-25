@@ -156,3 +156,23 @@ def test_sweep_never_releases_a_slot_whose_head_left_the_branch(repo: Path):
     assert result.action == "skipped"
     assert pool.status()[0].state == "taken"
     assert git.rev_parse(path, "HEAD") == follow_up
+
+
+def test_sweep_releases_a_slot_detached_at_a_commit_base_holds(repo: Path):
+    pool, path, sha = squashed_slot(repo)
+    run_git("checkout", "-q", "--detach", sha, cwd=path)
+
+    [result] = pool.sweep()
+
+    assert result.action == "released"
+    assert pool.status()[0].state == "ready"
+
+
+def test_sweep_never_releases_a_slot_switched_to_another_branch(repo: Path):
+    pool, path, _ = squashed_slot(repo)
+    run_git("switch", "-q", "-c", "next", cwd=path)
+
+    [result] = pool.sweep()
+
+    assert result.action == "skipped"
+    assert git.head_branch(path) == "next"
