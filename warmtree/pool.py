@@ -134,6 +134,18 @@ def _detached_blocker(repo: Path, path: Path) -> str | None:
     return None
 
 
+def _nested_blocker(repo: Path, path: Path) -> str | None:
+    """Why a worktree nested in a slot must not be removed, or None.
+
+    Nested trees need not be merged: a review tool makes them to read a
+    commit, not to write one. So the bar is that nothing at all happened in
+    the tree since it was made, on top of every check a detached tree gets.
+    """
+    if not git.untouched_since_created(path):
+        return "may hold work made inside it"
+    return _detached_blocker(repo, path)
+
+
 class PoolError(Exception):
     """A pool operation cannot proceed. The message is written for the user."""
 
@@ -201,6 +213,12 @@ class Swept:
             return "clean"
         if self.action == "skipped":
             if " is held by process " in self.reason:
+                return "in-flight"
+            return "needs-you"
+        if self.reason.startswith("nested in ") or ", but nested worktree " in (
+            self.reason
+        ):
+            if self.reason.endswith(f"within the last {DETACHED_IDLE_DAYS} days"):
                 return "in-flight"
             return "needs-you"
         if "(sweep --detached removes it)" in self.reason:
@@ -627,7 +645,14 @@ class Pool:
             # leave a directory behind.
             return self.status() if self.state_path.exists() else []
 
+        worktrees = git.worktree_list(self.repo_root)
+        claimed: set[Path] = set()  # nested trees, kept out of the hand-made pass
         for slot in slots():
+            home = Path(slot.path).resolve()
+            trees = [p for p in worktrees if p != home and p.is_relative_to(home)]
+            claimed.update(trees)
+            found, stays = self._sweep_nested(slot, trees, dry_run)
+            results.extend(found)
             if slot.state != "taken" or slot.branch is None:
                 continue
             if slot.branch == base_branch:
@@ -636,6 +661,12 @@ class Pool:
             why = landed(slot.branch)
             if why is None:
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
+                continue
+            if stays is not None:
+                # Releasing would hand the slot to new work with a tree
+                # still inside it; an adopted slot would even move it.
+                reason = f"{why}, but {stays}"
+                results.append(Swept(slot.name, slot.branch, "kept", reason))
                 continue
             if dry_run:
                 refusal = self._release_refusal(slot)
@@ -657,8 +688,8 @@ class Pool:
         known = {Path(s.path).resolve() for s in slots()}
         known.add(self.repo_root.resolve())
         pool_root = self.dir.resolve()
-        for path in git.worktree_list(self.repo_root):
-            if path in known:
+        for path in worktrees:
+            if path in known or path in claimed:
                 continue
             if path == pool_root or path.is_relative_to(pool_root):
                 # A slot state.json forgot is still a slot, not a hand-made
@@ -723,6 +754,41 @@ class Pool:
             except (PoolError, git.GitError) as exc:
                 results.append(Swept(label, branch, "skipped", str(exc)))
         return results
+
+    def _sweep_nested(
+        self, slot: Slot, trees: list[Path], dry_run: bool
+    ) -> tuple[list["Swept"], str | None]:
+        """Remove the worktrees nested in a slot that nothing happened in.
+
+        Returns the decisions and, when any tree stays, why the slot must
+        stay with it. A tree that is gone or not ours is left to doctor.
+        """
+        results: list[Swept] = []
+        stays: str | None = None
+        for path in trees:
+            if not path.is_dir() or not git.owns_worktree(self.repo_root, path):
+                continue
+            label = str(path)
+            branch = git.head_branch(path)
+            try:
+                blocker = _nested_blocker(self.repo_root, path)
+            except git.GitError as exc:
+                blocker = f"could not be inspected: {exc}"
+            if blocker is not None:
+                reason = f"nested in {slot.name}, but {blocker}"
+                results.append(Swept(label, branch, "kept", reason))
+                stays = stays or f"nested worktree {path} {blocker}"
+                continue
+            if not dry_run:
+                try:
+                    git.worktree_remove(self.repo_root, path)
+                except git.GitError as exc:
+                    results.append(Swept(label, branch, "skipped", str(exc)))
+                    stays = stays or f"nested worktree {path} could not be removed"
+                    continue
+            reason = f"nested in {slot.name}, untouched since created"
+            results.append(Swept(label, branch, "removed", reason))
+        return results, stays
 
     def _certified_delete(self, branch: str) -> None:
         """Remove a branch sweep has already certified as merged.
