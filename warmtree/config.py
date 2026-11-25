@@ -8,7 +8,7 @@ import json
 import re
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 CONFIG_NAME = ".warmtree.toml"
 
@@ -72,6 +72,8 @@ def parse(text: str) -> Config:
                 raise ConfigError(f"unknown key {key!r} in [{table_name}]")
             values[key] = _check(table_name, key, value, expected)
 
+    for entry in values.get("copy", ()):
+        _check_copy_entry(entry)  # type: ignore[arg-type]
     size = values.get("size", Config.size)
     if isinstance(size, int) and size < 0:
         raise ConfigError("[pool] size must be zero or more")
@@ -106,6 +108,18 @@ def _check(table: str, key: str, value: object, expected: type) -> object:
             raise ConfigError(f"[{table}] {key} must be a list of strings")
         return tuple(value)
     return value
+
+
+def _check_copy_entry(entry: str) -> None:
+    """A `copy` entry is a path inside the repo: never absolute, never `..`.
+
+    Either would make warmtree write outside the slot it is warming.
+    """
+    for flavour in (PurePosixPath(entry), PureWindowsPath(entry)):
+        if flavour.is_absolute() or flavour.drive or ".." in flavour.parts:
+            raise ConfigError(
+                f"[warm] copy entries must be paths inside the repo: {entry!r}"
+            )
 
 
 def load(repo_root: Path) -> Config:
