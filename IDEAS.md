@@ -98,3 +98,9 @@ Append here instead of expanding DESIGN.md.
   versions against one pool. Found by the third review of #27 (2026-11).
   A fix going forward: have `from_dict` ignore unknown keys. Nothing can
   repair the versions already released.
+- **A symlinked folder on a `copy` path still writes through (known gap).**
+  A symlink at a `copy` target in a slot is replaced by a real copy, but
+  when a parent folder in the path (`config/` in `config/.env`) is itself a
+  symlink, the copy lands wherever that folder points. Found while taking
+  the symlink fix from #23 (2026-11). Rarer than a linked `.env`. A fix
+  would resolve the target and refuse paths that leave the slot.

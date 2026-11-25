@@ -188,7 +188,8 @@ Details worth knowing:
   `WARMTREE_SLOT=<n>` in the environment. Output is captured and shown only
   when a command fails. warmtree has no idea what npm or dotnet are; you do.
 - `copy` paths are relative to the repo root. Files missing from the main
-  worktree are skipped. With `env = true`, copied files named like `.env`,
+  worktree are skipped. A symlink at that path in a slot is replaced by a
+  real copy; the file it pointed to is never written. With `env = true`, copied files named like `.env`,
   `.env.local`, or `app.env` get a `WARMTREE_SLOT=<n>` line appended, so your
   project can derive a per-slot port or database name from it.
 - `lockfiles` are hashed inside the slot after each warm. `refresh` re-runs
