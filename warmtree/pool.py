@@ -101,11 +101,15 @@ def _nested_repo(path: Path, folders: list[str]) -> str | None:
     return None
 
 
-def _detached_blocker(repo: Path, path: Path) -> str | None:
+def _detached_blocker(
+    repo: Path, path: Path, check_stranded: bool = True
+) -> str | None:
     """Why a merged, detached worktree must not be removed, or None.
 
     Each check guards something removal would destroy beyond the commit
-    itself, which base already holds.
+    itself, which base already holds. check_stranded=False skips the
+    stranded-commit check, for callers that already proved nothing was
+    committed in the tree.
     """
     if git.is_dirty(path):
         return "has uncommitted changes"
@@ -114,7 +118,7 @@ def _detached_blocker(repo: Path, path: Path) -> str | None:
     operation = git.operation_in_progress(path)
     if operation is not None:
         return f"a {operation} is in progress"
-    if git.has_stranded_commits(repo, path):
+    if check_stranded and git.has_stranded_commits(repo, path):
         return "has commits no branch or tag holds"
     ignored = git.ignored_paths(path)
     nested = _nested_repo(
@@ -140,10 +144,13 @@ def _nested_blocker(repo: Path, path: Path) -> str | None:
     Nested trees need not be merged: a review tool makes them to read a
     commit, not to write one. So the bar is that nothing at all happened in
     the tree since it was made, on top of every check a detached tree gets.
+    The commit it was made at may be held by no ref (a review of a branch
+    since squashed and deleted); that commit is someone else's, not work
+    made here, so it does not keep the tree.
     """
     if not git.untouched_since_created(path):
         return "may hold work made inside it"
-    return _detached_blocker(repo, path)
+    return _detached_blocker(repo, path, check_stranded=False)
 
 
 class PoolError(Exception):
