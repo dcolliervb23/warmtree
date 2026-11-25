@@ -94,3 +94,27 @@ def test_squash_release_groups_as_clean(repo: Path):
     [result] = pool.sweep(dry_run=True)
 
     assert result.group == "clean"
+
+
+def test_cli_sweep_says_a_squash_merged_branch_was_kept(
+    repo: Path, capsys, monkeypatch
+):
+    from warmtree.cli import main
+
+    _, _, sha = squashed_slot(repo)
+    monkeypatch.chdir(repo)
+
+    assert main(["sweep"]) == 0
+    out = capsys.readouterr().out
+    assert f"released: slot-1 (feat): squash-merged as {sha}; branch kept" in out
+
+
+def test_cli_dry_run_names_the_squash_commit(repo: Path, capsys, monkeypatch):
+    from warmtree.cli import main
+
+    _, _, sha = squashed_slot(repo)
+    monkeypatch.chdir(repo)
+
+    assert main(["sweep", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert f"release slot-1 (feat): squash-merged as {sha}; branch kept" in out

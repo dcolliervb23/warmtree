@@ -203,3 +203,16 @@ def test_sweep_keeps_a_nested_tree_when_reflogs_are_off(repo: Path):
 
     assert result.reason == "nested in slot-1, but may hold work made inside it"
     assert tree.exists()
+
+
+def test_cli_sweep_explains_a_nested_tree_it_kept(repo: Path, capsys, monkeypatch):
+    from warmtree.cli import main
+
+    _, slot_path = ready_slot(repo)
+    tree = nested(repo, slot_path)
+    (tree / "notes.txt").write_text("notes\n")
+    monkeypatch.chdir(repo)
+
+    assert main(["sweep"]) == 0
+    err = capsys.readouterr().err
+    assert f"kept {tree}: nested in slot-1, but has uncommitted changes" in err
