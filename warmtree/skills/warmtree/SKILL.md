@@ -171,6 +171,8 @@ abandoned.
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
+| `released: <slot> (<branch>): squash-merged as <sha>; branch kept` | `sweep` found the branch's whole change on base as one squashed commit and freed the slot; the branch stays. | Nothing. Ask the user before deleting the branch (`git branch -D`), since its own commits are not on base. |
+| `kept <path>: nested in <slot>, but <reason>` | A worktree inside that slot (often one a tool made) may hold work, so `sweep` kept it; a merged slot holding it stays taken. | Tell the user the reason; they decide whether to remove it. Never remove it yourself. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 | ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
 | `kept branch <x>: it has commits that are not merged` or `kept branch <x>: it is the base branch` | `release` returned the slot but kept the branch on purpose. | Nothing; never delete the branch yourself. Ask the user before deleting an unmerged branch. |
@@ -198,13 +200,13 @@ abandoned.
 | `warmtree doctor [--fix]` | Report drift between pool state, git, and disk; `--fix` applies the safe repairs. |
 | `warmtree remove <slot...> [--all] [--force]` | Delete slots and their dependencies. Refuses taken slots and slots holding work without `--force`. Only when the user asks. |
 | `warmtree adopt <path>` | Register an existing hand-made worktree as a taken slot, in place. |
-| `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
+| `warmtree sweep [--fetch] [--detached] [--dry-run]` | Fold every merged branch's slot or worktree back into the pool, including slots whose branch was squash-merged (the branch is kept), and remove idle worktrees nested in slots that nothing was done in. `--detached` also removes idle, clean detached checkouts already merged into base; anything holding work stays. `--dry-run` changes nothing and lists what it would clean up and what needs the user. |
 
 `adopt` changes nothing on disk: the worktree is registered where it is,
 and the folder moves into the pool later, at release, once the branch is
 done. Only run it when the user asks you to onboard an existing worktree.
-`sweep` touches only branches git certifies as merged and skips dirty
-trees, but it does move the merged worktrees' folders into the pool; run
+`sweep` touches only branches that landed on base, merged or squashed, and
+skips dirty trees, but it does move the merged worktrees' folders into the pool; run
 it when the user asks for a cleanup, not on your own initiative.
 
 Start every cleanup with `warmtree sweep --dry-run` (add `--fetch` when the
@@ -213,7 +215,10 @@ at: "would clean up" is what a real sweep will do; "needs you" lists
 worktrees only the user can settle, such as uncommitted changes, commits no
 branch holds, an `.env`, or a paused bisect; "still in flight" is normal
 work. Show the user the "needs you" list and leave those trees alone: never
-discard work to make sweep take them. Squash-merged branches look unmerged
-to git and stay in flight; release them only once the user confirms they
-are merged. `--detached` deletes detached checkouts rather than folding
+discard work to make sweep take them. Sweep recognizes a squash merge when
+base holds the branch's exact change; one edited while merging still looks
+unmerged and stays in flight, so release it only once the user confirms it
+is merged. Worktrees your tools create inside a slot are removed by sweep
+only when idle and untouched since they were made; never leave work in one
+expecting it to survive, and never delete one that sweep kept. `--detached` deletes detached checkouts rather than folding
 them; add it only when the user asks to remove old detached checkouts.
