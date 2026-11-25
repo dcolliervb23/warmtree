@@ -736,13 +736,16 @@ def print_sweep_plan(results: list) -> None:
         for item in items:
             held = item.branch if item.branch is not None else "detached"
             if group == "clean":
-                print(f"  {SWEEP_VERBS[item.action]} {item.name} ({held})")
+                line = f"  {SWEEP_VERBS[item.action]} {item.name} ({held})"
+                if item.reason not in ("merged", "detached, merged"):
+                    line += f": {item.reason}"  # a squash merge or a nested tree
+                print(line)
             else:
                 print(f"  {item.name} ({held}): {item.reason}")
         if group == "in-flight" and any(i.reason == "not merged" for i in items):
             print(
-                "  (squash-merged branches look unmerged to git and show here; "
-                "release those yourself)"
+                "  (a branch squash-merged with edits looks unmerged and "
+                "shows here; release those yourself once you confirm)"
             )
     if not results:
         print("nothing to sweep")
@@ -761,14 +764,21 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
-            print(f"{item.action}: {item.name} ({item.branch})")
+            line = f"{item.action}: {item.name} ({item.branch})"
+            if item.reason != "merged":
+                line += f": {item.reason}"  # a squash merge; the branch stays
+            print(line)
         elif item.action == "removed":
             removed += 1
             print(f"removed: {item.name} ({item.reason})")
         elif item.action == "skipped":
             held = item.branch if item.branch is not None else "detached"
             note(f"skipped {item.name} ({held}): {item.reason}")
-        elif item.action == "kept" and item.reason.startswith("detached HEAD, merged"):
+        elif item.action == "kept" and (
+            item.reason.startswith("detached HEAD, merged")
+            or item.reason.startswith("nested in ")
+            or ", but nested worktree " in item.reason
+        ):
             note(f"kept {item.name}: {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
     skipped = sum(1 for item in results if item.action == "skipped")
