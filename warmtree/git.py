@@ -189,8 +189,11 @@ def squash_landed(repo: Path, branch: str, base_ref: str) -> str | None:
     so the branch is never an ancestor of base. Its fingerprint (patch-id)
     still equals that commit's: the diff from the merge base to the branch
     tip is the same change. Only commits after the merge base that touch
-    the branch's files are compared. None when no commit matches, which
-    includes a squash edited while merging and a branch with work after it.
+    the branch's files are compared. A fingerprint ignores whitespace and
+    line positions, so a match is only a candidate: it counts once merging
+    the branch into that commit changes nothing. None when no commit
+    matches, which includes a squash edited while merging and a branch
+    with work after it.
     """
     merge_base = run(["merge-base", branch, base_ref], cwd=repo)
     names = run(["diff", "--name-only", "-z", merge_base, branch], cwd=repo)
@@ -201,30 +204,41 @@ def squash_landed(repo: Path, branch: str, base_ref: str) -> str | None:
     wanted = run(["patch-id", "--stable"], cwd=repo, stdin=change + "\n").split()
     if not wanted:
         return None
+    # The paths go on stdin: a branch touching a few hundred files would
+    # pass Windows' command-line limit.
     history = run(
         [
             "log",
+            "--stdin",
             "-p",
             *_FINGERPRINT_DIFF,
             "--full-diff",
             "--format=commit %H",
             f"{merge_base}..{base_ref}",
-            "--",
-            *paths,
         ],
         cwd=repo,
+        stdin="--\n" + "\n".join(paths) + "\n",
     )
     if not history:
         return None
     found = run(["patch-id", "--stable"], cwd=repo, stdin=history + "\n")
     for line in found.splitlines():
         patch_id, commit = line.split()
-        if patch_id == wanted[0]:
+        if patch_id == wanted[0] and _holds(repo, commit, branch):
             return run(["rev-parse", "--short", commit], cwd=repo)
     return None
 
 
-_SHOW_ALL =("--untracked-files=normal", "--ignore-submodules=none")
+def _holds(repo: Path, commit: str, branch: str) -> bool:
+    """True when merging `branch` into `commit` would change nothing."""
+    try:
+        merged = run(["merge-tree", "--write-tree", commit, branch], cwd=repo)
+    except GitError:
+        return False  # a conflict, or a git older than 2.38
+    return merged.splitlines()[0] == run(["rev-parse", f"{commit}^{{tree}}"], cwd=repo)
+
+
+_SHOW_ALL = ("--untracked-files=normal", "--ignore-submodules=none")
 
 
 def is_dirty(path: Path) -> bool:
@@ -311,17 +325,28 @@ def has_stranded_commits(repo: Path, path: Path) -> bool:
 def untouched_since_created(path: Path) -> bool:
     """True when nothing has happened in this worktree since it was made.
 
-    Its HEAD history holds only its creation (no commit, checkout, or reset
-    since) and it has no refs of its own. A worktree with no HEAD history
-    at all, as with reflogs turned off, proves nothing and counts as
+    Its HEAD history starts with its creation (the entry whose old commit
+    is all zeros) and HEAD never left the commit it was made at: `git
+    worktree add -b` also logs a reset to that same commit. It has no refs
+    of its own either. No history, as with reflogs turned off, or history
+    whose creation entry gc already expired, proves nothing and counts as
     touched.
     """
+    log = git_dir(path) / "logs" / "HEAD"
     try:
-        history = run(["reflog", "show", "--format=%H", "HEAD"], cwd=path)
-    except GitError:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return False
+    entries = [line.split(" ", 2)[:2] for line in lines if line]
+    if not entries or entries[0][0].strip("0"):
+        return False
+    made_at = entries[0][1]
+    for old, new in entries:
+        moved_from_elsewhere = old.strip("0") and old != made_at
+        if new != made_at or moved_from_elsewhere:
+            return False
     own_refs = run(["for-each-ref", "--format=%(refname)", "refs/worktree/"], cwd=path)
-    return len(history.splitlines()) == 1 and not own_refs
+    return not own_refs
 
 
 def is_locked(path: Path) -> bool:

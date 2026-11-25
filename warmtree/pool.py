@@ -554,6 +554,16 @@ class Pool:
                 f"(since {slot.lease_since}); release from that session, "
                 "wait for it to exit, or use --force"
             )
+        if not force and slot.branch is not None:
+            head = git.head_branch(path)
+            if head != slot.branch:
+                # Parking would force a checkout over whatever HEAD holds
+                # now: commits on a detached HEAD would lose their last ref.
+                where = "a detached HEAD" if head is None else head
+                return (
+                    f"{slot.name} has {where} checked out, not {slot.branch}; "
+                    f"check out {slot.branch} again, or use --force"
+                )
         if not force and git.is_dirty(path):
             return (
                 f"{slot.name} has uncommitted changes; commit or stash them, "
@@ -643,8 +653,10 @@ class Pool:
                 return "merged"
             try:
                 sha = git.squash_landed(self.repo_root, branch, base_ref)
-            except git.GitError:
-                return None  # e.g. the branch was deleted; not proven landed
+            except (git.GitError, OSError):
+                # A deleted branch, or a check the system cannot run:
+                # not proven landed, and the other slots still get swept.
+                return None
             if sha is not None:
                 return f"squash-merged as {sha}; branch kept"
             return None
@@ -657,9 +669,11 @@ class Pool:
 
         worktrees = git.worktree_list(self.repo_root)
         claimed: set[Path] = set()  # nested trees, kept out of the hand-made pass
+        homes = {Path(s.path).resolve() for s in slots()}
         for slot in slots():
             home = Path(slot.path).resolve()
-            trees = [p for p in worktrees if p != home and p.is_relative_to(home)]
+            # A tree that is itself a slot is that slot's business.
+            trees = [p for p in worktrees if p not in homes and p.is_relative_to(home)]
             claimed.update(trees)
             found, stays = self._sweep_nested(slot, trees, dry_run)
             results.extend(found)
