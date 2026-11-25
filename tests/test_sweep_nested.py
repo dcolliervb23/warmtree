@@ -216,3 +216,22 @@ def test_cli_sweep_explains_a_nested_tree_it_kept(repo: Path, capsys, monkeypatc
     assert main(["sweep"]) == 0
     err = capsys.readouterr().err
     assert f"kept {tree}: nested in slot-1, but has uncommitted changes" in err
+
+
+def test_sweep_removes_an_untouched_tree_at_a_commit_no_ref_holds(repo: Path):
+    # A review tree of a PR head whose branch was squash-merged and deleted:
+    # nothing was made in the tree, so its commit is not its work.
+    pool, slot_path = ready_slot(repo)
+    run_git("checkout", "-q", "-b", "pr", cwd=repo)
+    run_git("commit", "-q", "--allow-empty", "-m", "pr head", cwd=repo)
+    run_git("checkout", "-q", "main", cwd=repo)
+    path = slot_path / ".loop" / "reviews" / "pr"
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text(exclude.read_text() + ".loop/\n")
+    run_git("worktree", "add", "-q", "--detach", str(path), "pr", cwd=repo)
+    run_git("branch", "-q", "-D", "pr", cwd=repo)
+    idle(path)
+
+    result = result_for(pool.sweep(), path.resolve())
+
+    assert result.action == "removed"
