@@ -122,7 +122,7 @@ def test_copy_files_failure_is_a_warm_error(tmp_path: Path):
     (source / ".env").write_text("PORT=3000\n")
     (slot / ".env").mkdir()  # a folder where the file should go
 
-    with pytest.raises(WarmError, match=".env"):
+    with pytest.raises(WarmError, match=r"\.env"):
         warm.copy_files(source, slot, (".env",), slot_number=2, env=False)
 
 
@@ -152,3 +152,53 @@ def test_run_commands_failure_names_command_and_exit_code(tmp_path: Path):
 def test_run_commands_failure_includes_output(tmp_path: Path):
     with pytest.raises(WarmError, match="something broke"):
         warm.run_commands(tmp_path, ("echo something broke&& exit 1",), slot_number=1)
+
+
+def test_copy_files_refuses_a_symlinked_folder_that_leaves_the_slot(tmp_path: Path):
+    # The slot's config/ links to the main checkout's config/, whose .env is
+    # itself a link to the developer's secrets: none of that may change.
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    secrets = tmp_path / "secrets.env"
+    (source / "config").mkdir(parents=True)
+    slot.mkdir()
+    secrets.write_text("API_KEY=only-copy\n")
+    symlink_or_skip(source / "config" / ".env", secrets)
+    symlink_or_skip(slot / "config", source / "config")
+
+    with pytest.raises(WarmError, match="config/.env"):
+        warm.copy_files(source, slot, ("config/.env",), slot_number=2, env=True)
+
+    assert (source / "config" / ".env").is_symlink()
+    assert secrets.read_text() == "API_KEY=only-copy\n"
+
+
+def test_copy_files_never_writes_through_a_hard_link_in_the_slot(tmp_path: Path):
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    source.mkdir()
+    slot.mkdir()
+    (source / ".env").write_text("PORT=3000\n")
+    shared = tmp_path / "shared.env"
+    shared.write_text("API_KEY=only-copy\n")
+    try:
+        (slot / ".env").hardlink_to(shared)
+    except OSError:
+        pytest.skip("this system cannot create hard links")
+
+    warm.copy_files(source, slot, (".env",), slot_number=2, env=True)
+
+    assert shared.read_text() == "API_KEY=only-copy\n"
+    assert (slot / ".env").read_text() == "PORT=3000\nWARMTREE_SLOT=2\n"
+
+
+def test_copy_files_an_env_file_that_is_not_utf8_is_a_warm_error(tmp_path: Path):
+    # Windows PowerShell 5.1 writes `>` redirects as UTF-16.
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    source.mkdir()
+    slot.mkdir()
+    (source / ".env").write_bytes("PORT=3000\n".encode("utf-16"))
+
+    with pytest.raises(WarmError, match=r"\.env"):
+        warm.copy_files(source, slot, (".env",), slot_number=2, env=True)

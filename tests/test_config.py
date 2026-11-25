@@ -111,3 +111,14 @@ def test_starter_toml_mentions_every_config_key():
     text = config.starter_toml([])
     for field in fields(Config):
         assert field.name in text, field.name
+
+
+@pytest.mark.parametrize("entry", ["/etc/app.env", "../shared/.env", "config/../../x"])
+def test_copy_entries_must_stay_inside_the_repo(entry: str):
+    with pytest.raises(ConfigError, match="copy"):
+        config.parse(f'[warm]\ncopy = ["{entry}"]\n')
+
+
+def test_a_windows_absolute_copy_entry_is_an_error():
+    with pytest.raises(ConfigError, match="copy"):
+        config.parse('[warm]\ncopy = ["C:/Users/me/.env"]\n')

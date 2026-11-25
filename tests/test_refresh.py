@@ -68,6 +68,21 @@ def test_failed_warm_leaves_slot_stale_and_raises(warm_repo: Path):
     assert slot.warmed is None
 
 
+def test_a_failed_copy_leaves_slot_stale_and_refresh_recovers(warm_repo: Path):
+    (warm_repo / ".env").write_bytes("PORT=3000\n".encode("utf-16"))
+    pool = Pool(warm_repo, Config(size=1, copy=(".env",)))
+
+    with pytest.raises(WarmError):
+        pool.fill()
+    [slot] = pool.status()
+    assert slot.state == "stale"
+
+    (warm_repo / ".env").write_text("PORT=3000\n")
+    pool.refresh()
+    [slot] = pool.status()
+    assert slot.state == "ready"
+
+
 def test_take_never_hands_out_a_stale_slot(warm_repo: Path):
     pool = Pool(warm_repo, Config(size=1, run=("exit 2",)))
     with pytest.raises(WarmError):
