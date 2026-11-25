@@ -168,7 +168,7 @@ abandoned.
 | `warmtree: fatal: not a git repository` | You are outside the repo. | `cd` into the repo or any of its worktrees. |
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
-| `slot-N has <a detached HEAD or another branch> checked out, not <branch>` | Someone moved the slot off its branch; releasing would bury anything committed there. | Tell the user what is checked out; never add `--force` on your own. |
+| `slot-N has <other branch> checked out, not <branch>` or `slot-N has commits on a detached HEAD that no branch holds, not <branch>` | Someone moved the slot off its branch; releasing would reset their work or bury those commits. | Tell the user what is checked out; never add `--force` on your own. |
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |

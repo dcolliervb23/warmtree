@@ -555,14 +555,21 @@ class Pool:
                 "wait for it to exit, or use --force"
             )
         if not force and slot.branch is not None:
+            # Parking forces a checkout over whatever HEAD holds now. Another
+            # branch means someone moved on to new work in the slot; a
+            # detached HEAD matters only when it holds commits no branch,
+            # tag, or remote does, which would lose their last ref.
             head = git.head_branch(path)
-            if head != slot.branch:
-                # Parking would force a checkout over whatever HEAD holds
-                # now: commits on a detached HEAD would lose their last ref.
-                where = "a detached HEAD" if head is None else head
+            if head is not None and head != slot.branch:
                 return (
-                    f"{slot.name} has {where} checked out, not {slot.branch}; "
+                    f"{slot.name} has {head} checked out, not {slot.branch}; "
                     f"check out {slot.branch} again, or use --force"
+                )
+            if head is None and git.head_has_unsaved_commits(path, None):
+                return (
+                    f"{slot.name} has commits on a detached HEAD that no branch "
+                    f"holds, not {slot.branch}; put them on a branch, or use "
+                    "--force"
                 )
         if not force and git.is_dirty(path):
             return (
