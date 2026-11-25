@@ -74,6 +74,58 @@ def test_copy_files_env_false_leaves_files_untouched(tmp_path: Path):
     assert (slot / ".env").read_text() == "PORT=3000\n"
 
 
+def symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this system cannot create symlinks")
+
+
+def test_copy_files_never_writes_through_a_symlink_in_the_slot(tmp_path: Path):
+    # A developer linked the slot's .env to a shared file; that file is
+    # theirs and lives outside the pool.
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    source.mkdir()
+    slot.mkdir()
+    (source / ".env").write_text("PORT=3000\n")
+    shared = tmp_path / "shared.env"
+    shared.write_text("API_KEY=only-copy\n")
+    symlink_or_skip(slot / ".env", shared)
+
+    warm.copy_files(source, slot, (".env",), slot_number=2, env=True)
+
+    assert shared.read_text() == "API_KEY=only-copy\n"
+    assert not (slot / ".env").is_symlink()
+    assert (slot / ".env").read_text() == "PORT=3000\nWARMTREE_SLOT=2\n"
+
+
+def test_copy_files_replaces_a_slot_symlink_to_the_source(tmp_path: Path):
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    source.mkdir()
+    slot.mkdir()
+    (source / ".env").write_text("PORT=3000\n")
+    symlink_or_skip(slot / ".env", source / ".env")
+
+    warm.copy_files(source, slot, (".env",), slot_number=2, env=True)
+
+    assert (source / ".env").read_text() == "PORT=3000\n"
+    assert (slot / ".env").read_text() == "PORT=3000\nWARMTREE_SLOT=2\n"
+
+
+def test_copy_files_failure_is_a_warm_error(tmp_path: Path):
+    source = tmp_path / "main"
+    slot = tmp_path / "slot"
+    source.mkdir()
+    slot.mkdir()
+    (source / ".env").write_text("PORT=3000\n")
+    (slot / ".env").mkdir()  # a folder where the file should go
+
+    with pytest.raises(WarmError, match=".env"):
+        warm.copy_files(source, slot, (".env",), slot_number=2, env=False)
+
+
 def test_run_commands_runs_in_slot_with_slot_variable(tmp_path: Path):
     warm.run_commands(tmp_path, (WRITE_SLOT_VAR,), slot_number=4)
     assert (tmp_path / "slot.txt").read_text() == "4"
