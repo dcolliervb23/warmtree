@@ -13,7 +13,6 @@ general cleanup; the design explains why.
   Plain messages: no co-author trailers, no session links.
 
 ## Publishing hygiene
-- `git config user.email dcolliervb23@users.noreply.github.com` in this repo. Never a personal email.
 - No secrets. PyPI publishing is GitHub Actions trusted publishing only.
 - No local machine paths in any committed file.
 - Assume every commit is public.

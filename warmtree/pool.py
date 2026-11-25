@@ -54,7 +54,9 @@ class Slot:
     warmed: str | None = None
     lockfiles: dict[str, str] = field(default_factory=dict)
     # Lease: the session (shell or agent) that took the slot. Set by take
-    # and adopt to their parent process, cleared by release. Optional with
+    # and adopt to their parent process, cleared by release. While a slot is
+    # warming it is the fill or refresh process doing the warm, so a slot
+    # whose warm died can be told from one still in progress. Optional with
     # defaults so state files from older versions load unchanged.
     lease_pid: int | None = None
     lease_since: str | None = None
@@ -192,7 +194,14 @@ class Pool:
                 name = _next_name(slots)
                 path = self.dir / name
                 git.worktree_add_detached(self.repo_root, path, self.base())
-                slot = Slot(name=name, path=str(path), state="warming", created=_now())
+                slot = Slot(
+                    name=name,
+                    path=str(path),
+                    state="warming",
+                    created=_now(),
+                    lease_pid=os.getpid(),
+                    lease_since=_now(),
+                )
                 slots.append(slot)
                 self.save_state(slots)
             # Warming can take minutes. The lock is released so take() and
@@ -620,7 +629,7 @@ class Pool:
         # this pass get their shrink consideration on the next one.
         self._shrink()
         with self.locked():
-            candidates = [s.name for s in self.load_state() if s.state in REFRESHABLE]
+            candidates = [s.name for s in self.load_state() if _refreshable(s)]
 
         results = []
         failures = []
@@ -628,19 +637,39 @@ class Pool:
             with self.locked():
                 slots = self.load_state()
                 slot = _find(slots, name)
-                if slot.state not in REFRESHABLE:
+                if not _refreshable(slot):
                     continue  # taken since we looked
-                was_stale = slot.state == "stale"
+                if slot.state == "warming":
+                    self.log(
+                        f"{name}: the warm by process {slot.lease_pid} died "
+                        "part way; warming it again"
+                    )
+                # A slot whose warm died part way may be half installed, so
+                # it is re-warmed like a stale one.
+                was_stale = slot.state != "ready"
                 slot.state = "warming"
+                slot.lease_pid = os.getpid()
+                slot.lease_since = _now()
                 self.save_state(slots)
-                base_commit = git.rev_parse(self.repo_root, base_ref)
 
             path = Path(slot.path)
-            moved = git.rev_parse(path, "HEAD") != base_commit
-            git.reset_to_detached(path, base_commit)
-            lockfiles_changed = (
-                warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
-            )
+            # Whatever stops this slot's refresh must not leave it warming:
+            # nothing would ever finish it. A git failure is reported with
+            # the warm failures and the rest of the pool is still refreshed.
+            try:
+                base_commit = git.rev_parse(self.repo_root, base_ref)
+                moved = git.rev_parse(path, "HEAD") != base_commit
+                git.reset_to_detached(path, base_commit)
+                lockfiles_changed = (
+                    warm.hash_lockfiles(path, self.config.lockfiles) != slot.lockfiles
+                )
+            except git.GitError as error:
+                self._mark_stale(name)
+                failures.append(f"{name}: {error}")
+                continue
+            except BaseException:
+                self._mark_stale(name)
+                raise
             rewarm = was_stale or lockfiles_changed
             # One slot that fails to warm must not keep the rest of the
             # pool on an old base. _warm has marked it stale, so the next
@@ -796,8 +825,9 @@ class Pool:
                 if not path.is_dir():
                     # A warming slot belongs to a live fill or refresh in
                     # another process; dropping its entry here would make
-                    # that worker fail when it writes its result.
-                    if slot.state == "warming":
+                    # that worker fail when it writes its result. One whose
+                    # process is gone has no worker, and is handled below.
+                    if slot.state == "warming" and not _orphaned(slot):
                         kept.append(slot)
                         findings.append(
                             Finding(
@@ -838,7 +868,25 @@ class Pool:
                             "worktree may recover it",
                         )
                     )
-                if slot.state == "warming":
+                if _orphaned(slot):
+                    # Its warm can never finish. Stale is the state refresh
+                    # already knows how to recover: it re-warms the slot.
+                    if fix:
+                        slot.state = "stale"
+                        slot.lease_pid = None
+                        slot.lease_since = None
+                        changed = True
+                    findings.append(
+                        Finding(
+                            slot.name,
+                            "marked warming, but the process warming it is gone",
+                            fixed=fix,
+                            hint=""
+                            if fix
+                            else "--fix marks it stale for refresh to re-warm",
+                        )
+                    )
+                elif slot.state == "warming":
                     findings.append(
                         Finding(
                             slot.name,
@@ -912,6 +960,9 @@ class Pool:
         and the error propagates so the caller can report it.
         """
         path = Path(slot.path)
+        # Any failure, not just a failed command, marks the slot stale: an
+        # interrupt or a closed output stream would otherwise leave it
+        # warming with no process left to finish it.
         try:
             copied = warm.copy_files(
                 self.repo_root, path, self.config.copy, slot.number, self.config.env
@@ -925,14 +976,23 @@ class Pool:
                     slot.number,
                     log=lambda message: self.log(f"{slot.name}: {message}"),
                 )
-        except warm.WarmError:
-            self._update_slot(slot.name, state="stale")
+            hashes = warm.hash_lockfiles(path, self.config.lockfiles)
+        except BaseException:
+            self._mark_stale(slot.name)
             raise
-        hashes = warm.hash_lockfiles(path, self.config.lockfiles)
         warmed = _now() if run else slot.warmed
         return self._update_slot(
-            slot.name, state="ready", warmed=warmed, lockfiles=hashes
+            slot.name,
+            state="ready",
+            warmed=warmed,
+            lockfiles=hashes,
+            lease_pid=None,
+            lease_since=None,
         )
+
+    def _mark_stale(self, name: str) -> None:
+        """End a warm that did not finish; the next refresh tries it again."""
+        self._update_slot(name, state="stale", lease_pid=None, lease_since=None)
 
 
 def _checkout(
@@ -979,6 +1039,24 @@ def _find_taken(slots: list[Slot], branch: str) -> Slot:
         if slot.state == "taken" and slot.branch == branch:
             return slot
     raise PoolError(f"no taken slot has branch {branch!r}")
+
+
+def _orphaned(slot: Slot) -> bool:
+    """A warming slot whose warming process is gone, so nothing will finish it.
+
+    Slots warmed by versions that did not record the process are left alone:
+    there is no way to tell whether their warm is still running.
+    """
+    return (
+        slot.state == "warming"
+        and slot.lease_pid is not None
+        and slot.lease_pid != os.getpid()
+        and not _pid_alive(slot.lease_pid)
+    )
+
+
+def _refreshable(slot: Slot) -> bool:
+    return slot.state in REFRESHABLE or _orphaned(slot)
 
 
 def _waiting(slots: list[Slot]) -> int:
