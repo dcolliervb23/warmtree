@@ -118,3 +118,14 @@ def test_cli_dry_run_names_the_squash_commit(repo: Path, capsys, monkeypatch):
     assert main(["sweep", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert f"release slot-1 (feat): squash-merged as {sha}; branch kept" in out
+
+
+def test_a_slot_whose_branch_was_deleted_does_not_stop_sweep(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    path = committed_slot(pool, repo, "gone", merged=False)
+    run_git("checkout", "-q", "--detach", cwd=path)
+    run_git("branch", "-q", "-D", "gone", cwd=repo)
+
+    [result] = pool.sweep()
+
+    assert (result.action, result.reason) == ("kept", "not merged")
