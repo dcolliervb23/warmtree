@@ -60,3 +60,41 @@ def test_worktree_list_includes_main_and_linked(repo: Path, tmp_path: Path):
     paths = git.worktree_list(repo)
     assert repo.resolve() in paths
     assert linked.resolve() in paths
+
+
+# --- untouched_since_created --------------------------------------------
+
+
+def fresh_worktree(repo: Path, ref: str = "main") -> Path:
+    path = repo.parent / "fresh"
+    git.run(["worktree", "add", "-q", "--detach", str(path), ref], cwd=repo)
+    return path
+
+
+def test_a_fresh_detached_worktree_is_untouched(repo: Path):
+    assert git.untouched_since_created(fresh_worktree(repo)) is True
+
+
+def test_a_commit_inside_is_not_untouched(repo: Path):
+    path = fresh_worktree(repo)
+    git.run(["commit", "-q", "--allow-empty", "-m", "inside"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_checkout_inside_is_not_untouched(repo: Path):
+    first = git.rev_parse(repo, "main")
+    git.run(["commit", "-q", "--allow-empty", "-m", "second"], cwd=repo)
+    path = fresh_worktree(repo, first)
+    git.run(["checkout", "-q", "--detach", "main"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_worktree_ref_is_not_untouched(repo: Path):
+    path = fresh_worktree(repo)
+    git.run(["update-ref", "refs/worktree/keep", "HEAD"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_no_reflog_is_not_untouched(repo: Path):
+    git.run(["config", "core.logAllRefUpdates", "false"], cwd=repo)
+    assert git.untouched_since_created(fresh_worktree(repo)) is False
