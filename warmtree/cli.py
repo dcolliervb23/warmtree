@@ -241,9 +241,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="return a slot to the pool",
         description="Park the slot holding BRANCH back on base with a "
         "detached HEAD and mark it ready, keeping its installed dependencies. "
-        "Refuses a dirty tree, a slot switched to another branch or holding "
-        "commits on a detached HEAD that no branch holds, and a slot another "
-        "still-running session took, unless --force. Deletes the branch only if it is "
+        "Refuses a dirty tree, a paused bisect, rebase, or merge, a slot "
+        "switched to another branch or holding commits on a detached HEAD "
+        "that no branch holds, and a slot another still-running session "
+        "took, unless --force. Deletes the branch only if it is "
         "merged; an unmerged branch, and the base branch, are always kept. "
         "An adopted worktree's folder moves into the pool now.",
     )

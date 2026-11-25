@@ -122,3 +122,17 @@ Append here instead of expanding DESIGN.md.
   - Three squash tests pass without the flag they name (`-U0`,
     `--full-index`, `--no-ext-diff`/`--no-textconv`), and `--no-renames` has
     no test.
+  - Round 2 leftovers, all keeping rather than deleting:
+    - After `git branch -m` in a slot, release's "check out <old> again"
+      advice names a branch that no longer exists; only `--force` gets out.
+      Doctor could re-point a taken slot to its checked-out branch.
+    - A tree nested in slot B, itself inside slot A, is reported by both
+      passes and keeps both slots. Give each tree to its deepest slot.
+    - A `logs/HEAD` line with fewer than two fields raises ValueError and
+      aborts sweep. Git never writes one; treat it as touched.
+    - In reftable repositories (git 2.45+) there is no `logs/HEAD`, so
+      nested trees never qualify for removal.
+    - `sweep --dry-run` can write unreachable tree objects through
+      `merge-tree --write-tree`; gc removes them.
+    - `test_a_commit_whose_creation_entry_expired_is_not_untouched` passes
+      through the moved-HEAD check, not the first-entry check it names.

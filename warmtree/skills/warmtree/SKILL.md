@@ -168,12 +168,14 @@ abandoned.
 | `warmtree: fatal: not a git repository` | You are outside the repo. | `cd` into the repo or any of its worktrees. |
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
+| `slot-N has a <bisect, rebase, or merge> in progress; finish or abort it, or use --force` | Someone paused an operation in that slot; releasing would reset it. | Tell the user; never finish, abort, or `--force` it yourself. |
 | `slot-N has <other branch> checked out, not <branch>` or `slot-N has commits on a detached HEAD that no branch holds, not <branch>` | Someone moved the slot off its branch; releasing would reset their work or bury those commits. | Tell the user what is checked out; never add `--force` on your own. |
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
 | `released: <slot> (<branch>): squash-merged as <sha>; branch kept` | `sweep` found the branch's whole change on base as one squashed commit and freed the slot; the branch stays. | Nothing. Ask the user before deleting the branch (`git branch -D`), since its own commits are not on base. |
 | `kept <path>: nested in <slot>, but <reason>` | A worktree inside that slot (often one a tool made) may hold work, so `sweep` kept it; a merged slot holding it stays taken. | Tell the user the reason; they decide whether to remove it. Never remove it yourself. |
+| `kept slot-N: <merged or squash-merged>, but holds slot-M` | Another slot lives inside this one, so releasing it would reset or move that slot. | Nothing; once slot-M is released, `sweep` releases this one. |
 | `kept slot-N: <merged or squash-merged>, but nested worktree <path> <reason>` | The slot's branch landed, but a worktree inside it must stay, so the slot stays taken. | Tell the user about the nested worktree; once it is gone, `sweep` releases the slot. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 | ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
