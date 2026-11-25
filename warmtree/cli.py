@@ -180,7 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Create slots until [pool] size are waiting (ready, "
         "warming, or stale; taken slots do not count). Each is a "
         "worktree on a detached HEAD at base, with [warm] copy files copied "
-        "in and [warm] run commands executed. Warns when run is empty but "
+        "in and [warm] run commands executed. A copy replaces any link at its "
+        "path in the slot and never writes outside it. Warns when run is empty but "
         "the repo has a lockfile warmtree recognizes.",
     )
     fill.set_defaults(func=cmd_fill)
@@ -361,7 +362,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="move waiting slots to base, re-warm if lockfiles changed, "
         "and trim long-idle surplus",
         description="Bring waiting slots to the current base commit, "
-        "re-copy files, and re-run the warm commands where a lockfile "
+        "re-copy files (never writing outside the slot), and re-run the warm "
+        "commands where a lockfile "
         "hash changed. Also trims surplus ready slots that have sat "
         "unused longer than [pool] shrink_after (14d by default) back "
         "down to size. Runs automatically in the background per "

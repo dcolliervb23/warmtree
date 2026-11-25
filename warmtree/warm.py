@@ -16,7 +16,7 @@ ENV_VAR = "WARMTREE_SLOT"
 
 
 class WarmError(Exception):
-    """A warm command failed. The message names the command and exit code."""
+    """Warming a slot failed: a copy, or a command (named with its exit code)."""
 
 
 def hash_lockfiles(root: Path, names: tuple[str, ...]) -> dict[str, str]:
@@ -42,6 +42,8 @@ def copy_files(
     Files that do not exist in the main worktree are skipped. When `env` is
     on, copied env files get a `WARMTREE_SLOT=<n>` line so a project can
     derive per-slot ports or database names. Returns the names copied.
+    Nothing outside the slot is ever written or removed; any failure is a
+    WarmError, so the slot is marked stale.
     """
     copied = []
     for name in names:
@@ -49,12 +51,40 @@ def copy_files(
         if not source.is_file():
             continue
         target = slot_path / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-        if env and is_env_file(name):
-            set_slot_variable(target, slot_number)
+        try:
+            _replace_in_slot(source, target, slot_path, name)
+            if env and is_env_file(name):
+                set_slot_variable(target, slot_number)
+        except (OSError, UnicodeError) as error:
+            raise WarmError(f"could not copy {name} into the slot: {error}") from error
         copied.append(name)
     return copied
+
+
+def _replace_in_slot(source: Path, target: Path, slot_path: Path, name: str) -> None:
+    """Put a fresh copy of `source` at `target`, inside the slot only.
+
+    A folder on the way that resolves outside the slot (a symlinked
+    `config/`) is refused before anything is created. The copy is written
+    to a new file beside the target and renamed over it: a rename replaces
+    a symlink or hard link itself, so the file it led to is never written.
+    """
+    slot_root = slot_path.resolve()
+    existing = target.parent
+    while not existing.exists() and existing != slot_path:
+        existing = existing.parent
+    if not existing.resolve().is_relative_to(slot_root):
+        raise WarmError(
+            f"could not copy {name} into the slot: its folder leads outside it"
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.parent / f".{target.name}.warmtree-copy"
+    temporary.unlink(missing_ok=True)
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def is_env_file(name: str) -> bool:

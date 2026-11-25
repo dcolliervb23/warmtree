@@ -98,3 +98,9 @@ Append here instead of expanding DESIGN.md.
   versions against one pool. Found by the third review of #27 (2026-11).
   A fix going forward: have `from_dict` ignore unknown keys. Nothing can
   repair the versions already released.
+- **One slot's failed warm stops `refresh` for the slots after it (known
+  gap).** A `WarmError` in one slot ends the refresh loop; the later slots
+  are not moved to base, and the failing slot, now stale, is retried first
+  next time, so they wait until it is fixed. Older than #29 and the same
+  for copy and run failures. A fix would collect per-slot errors, finish
+  the loop, and report them together. Found by the review of #29 (2026-11).
