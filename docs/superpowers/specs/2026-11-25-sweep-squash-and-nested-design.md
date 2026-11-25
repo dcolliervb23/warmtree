@@ -53,10 +53,24 @@ left to find and clean it up by hand:
 
 A branch has landed when it is an ancestor of the sweep base ref (today's
 rule), or when some commit on base after the merge base has the same
-`git patch-id --stable` as `git diff <merge-base> <branch tip>`. The
+`git patch-id --stable` as `git diff -U0 <merge-base> <branch tip>`. The
 search is limited to base commits that touch the files the branch changed
-(`git log -p <merge-base>..<base> -- <paths>`), so it stays cheap on large
-repositories.
+(`git log -p -U0 --full-diff <merge-base>..<base> -- <paths>`), so it
+stays cheap on large repositories.
+
+- `-U0`: no context lines, so base moving around the change does not
+  alter the fingerprint.
+- `--full-diff`: the paths select commits but each commit's whole diff is
+  fingerprinted. Without it, a path-limited log can show only part of the
+  squash commit, and the fingerprints differ.
+
+Evidence from the dogfood repo (2026-11-25): of 29 local branches git
+sees as unmerged, GitHub merged 22 at their exact tips. This check caught
+all 22 and flagged none of the other 7.
+
+Only a forge could catch a squash merge edited during the merge (conflict
+fixes): base then holds a different change, and the slot stays taken for
+the user to release. Add a forge fallback only if that shows up in use.
 
 - A miss (the squash needed conflict fixes) leaves the slot taken: safe.
 - A match proves base already holds that exact change.
