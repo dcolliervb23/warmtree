@@ -252,3 +252,25 @@ def test_a_nested_tree_that_is_itself_a_slot_is_left_to_its_slot(repo: Path):
 
     assert not [r for r in results if r.name == str(inner.resolve())]
     assert inner.exists()
+
+
+def test_a_merged_slot_holding_another_slot_is_not_released(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    outer = committed_slot(pool, repo, "outer", merged=True)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text(exclude.read_text() + ".loop/\n")
+    inner = outer / ".loop" / "agent"
+    run_git("worktree", "add", "-q", "-b", "inner", str(inner), cwd=repo)
+    run_git("commit", "-q", "--allow-empty", "-m", "inner work", cwd=inner)
+    pool.adopt(inner)
+    (inner / "uncommitted.txt").write_text("wip\n")
+
+    [outer_result] = [r for r in pool.sweep() if r.name == "slot-1"]
+
+    assert (outer_result.action, outer_result.reason) == (
+        "kept",
+        "merged, but holds slot-2",
+    )
+    assert outer_result.group == "in-flight"
+    assert pool.status()[0].state == "taken"
+    assert (inner / "uncommitted.txt").exists()

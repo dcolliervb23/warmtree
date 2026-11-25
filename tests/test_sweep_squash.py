@@ -176,3 +176,20 @@ def test_sweep_never_releases_a_slot_switched_to_another_branch(repo: Path):
 
     assert result.action == "skipped"
     assert git.head_branch(path) == "next"
+
+
+def test_sweep_never_releases_a_slot_with_a_paused_bisect(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    path = committed_slot(pool, repo, "feat", merged=False)
+    (path / "more.txt").write_text("more\n")
+    run_git("add", ".", cwd=path)
+    run_git("commit", "-q", "-m", "more", cwd=path)
+    run_git("checkout", "-q", "main", cwd=repo)
+    run_git("merge", "-q", "--no-ff", "feat", cwd=repo)
+    run_git("bisect", "start", "feat", "feat~2", cwd=path)
+
+    [result] = pool.sweep()
+
+    assert result.action == "skipped"
+    assert git.operation_in_progress(path) == "bisect"
+    assert pool.status()[0].state == "taken"
