@@ -129,3 +129,30 @@ def test_a_slot_whose_branch_was_deleted_does_not_stop_sweep(repo: Path):
     [result] = pool.sweep()
 
     assert (result.action, result.reason) == ("kept", "not merged")
+
+
+def test_a_squash_check_the_system_cannot_run_does_not_stop_sweep(
+    repo: Path, monkeypatch
+):
+    pool, _, _ = squashed_slot(repo)
+
+    def too_long(*args, **kwargs):
+        raise OSError(7, "Argument list too long")
+
+    monkeypatch.setattr(git, "squash_landed", too_long)
+    [result] = pool.sweep()
+
+    assert (result.action, result.reason) == ("kept", "not merged")
+
+
+def test_sweep_never_releases_a_slot_whose_head_left_the_branch(repo: Path):
+    pool, path, _ = squashed_slot(repo)
+    run_git("checkout", "-q", "--detach", cwd=path)
+    run_git("commit", "-q", "--allow-empty", "-m", "follow-up", cwd=path)
+    follow_up = git.rev_parse(path, "HEAD")
+
+    [result] = pool.sweep()
+
+    assert result.action == "skipped"
+    assert pool.status()[0].state == "taken"
+    assert git.rev_parse(path, "HEAD") == follow_up

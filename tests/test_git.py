@@ -98,3 +98,19 @@ def test_a_worktree_ref_is_not_untouched(repo: Path):
 def test_no_reflog_is_not_untouched(repo: Path):
     git.run(["config", "core.logAllRefUpdates", "false"], cwd=repo)
     assert git.untouched_since_created(fresh_worktree(repo)) is False
+
+
+def test_a_commit_whose_creation_entry_expired_is_not_untouched(repo: Path):
+    # gc expires old reflog entries: a tree made long ago with one commit
+    # since is left with a single line that is not its creation.
+    path = fresh_worktree(repo)
+    git.run(["commit", "-q", "--allow-empty", "-m", "inside"], cwd=path)
+    log = git.git_dir(path) / "logs" / "HEAD"
+    log.write_text(log.read_text().splitlines(keepends=True)[-1])
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_worktree_made_with_a_new_branch_is_untouched(repo: Path):
+    path = repo.parent / "branched"
+    git.run(["worktree", "add", "-q", "-b", "agent", str(path)], cwd=repo)
+    assert git.untouched_since_created(path) is True

@@ -109,3 +109,36 @@ def test_user_diff_config_does_not_hide_a_squash(repo: Path):
     sha = squash_merge(repo, "feat")
 
     assert git.squash_landed(repo, "feat", "main") == sha
+
+
+def test_the_same_edit_elsewhere_in_the_file_does_not_match(repo: Path):
+    sections = "".join(f"[svc{n}]\nenabled = false\n\n" for n in range(1, 6))
+    commit(repo, "services.ini", sections, "services")
+    run_git("checkout", "-q", "-b", "feat", cwd=repo)
+    commit(
+        repo,
+        "services.ini",
+        sections.replace("[svc1]\nenabled = false", "[svc1]\nenabled = true"),
+        "enable svc1",
+    )
+    run_git("checkout", "-q", "main", cwd=repo)
+    commit(
+        repo,
+        "services.ini",
+        sections.replace("[svc4]\nenabled = false", "[svc4]\nenabled = true"),
+        "enable svc4",
+    )
+
+    assert git.squash_landed(repo, "feat", "main") is None
+
+
+def test_a_whitespace_change_after_the_squash_is_not_found(repo: Path):
+    commit(repo, "a.py", "if x:\n    y = 1\n", "start")
+    run_git("checkout", "-q", "-b", "feat", cwd=repo)
+    commit(repo, "a.py", "if x:\n    y = 1\n    z = 2\n", "add z")
+    squash_merge(repo, "feat")
+    run_git("checkout", "-q", "feat", cwd=repo)
+    commit(repo, "a.py", "if x:\n    y = 1\n  z = 2\n", "dedent z")
+    run_git("checkout", "-q", "main", cwd=repo)
+
+    assert git.squash_landed(repo, "feat", "main") is None

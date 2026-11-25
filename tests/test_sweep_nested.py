@@ -235,3 +235,19 @@ def test_sweep_removes_an_untouched_tree_at_a_commit_no_ref_holds(repo: Path):
     result = result_for(pool.sweep(), path.resolve())
 
     assert result.action == "removed"
+
+
+def test_a_nested_tree_that_is_itself_a_slot_is_left_to_its_slot(repo: Path):
+    pool = Pool(repo, Config(size=0))
+    outer = committed_slot(pool, repo, "outer", merged=False)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text(exclude.read_text() + ".loop/\n")
+    inner = outer / ".loop" / "agent"
+    run_git("worktree", "add", "-q", "-b", "inner", str(inner), cwd=repo)
+    pool.adopt(inner)
+    idle(inner)
+
+    results = pool.sweep()
+
+    assert not [r for r in results if r.name == str(inner.resolve())]
+    assert inner.exists()
