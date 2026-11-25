@@ -308,6 +308,22 @@ def has_stranded_commits(repo: Path, path: Path) -> bool:
     return bool(stranded)
 
 
+def untouched_since_created(path: Path) -> bool:
+    """True when nothing has happened in this worktree since it was made.
+
+    Its HEAD history holds only its creation (no commit, checkout, or reset
+    since) and it has no refs of its own. A worktree with no HEAD history
+    at all, as with reflogs turned off, proves nothing and counts as
+    touched.
+    """
+    try:
+        history = run(["reflog", "show", "--format=%H", "HEAD"], cwd=path)
+    except GitError:
+        return False
+    own_refs = run(["for-each-ref", "--format=%(refname)", "refs/worktree/"], cwd=path)
+    return len(history.splitlines()) == 1 and not own_refs
+
+
 def is_locked(path: Path) -> bool:
     """True when `git worktree lock` protects this worktree."""
     return (git_dir(path) / "locked").exists()
