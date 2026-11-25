@@ -60,3 +60,57 @@ def test_worktree_list_includes_main_and_linked(repo: Path, tmp_path: Path):
     paths = git.worktree_list(repo)
     assert repo.resolve() in paths
     assert linked.resolve() in paths
+
+
+# --- untouched_since_created --------------------------------------------
+
+
+def fresh_worktree(repo: Path, ref: str = "main") -> Path:
+    path = repo.parent / "fresh"
+    git.run(["worktree", "add", "-q", "--detach", str(path), ref], cwd=repo)
+    return path
+
+
+def test_a_fresh_detached_worktree_is_untouched(repo: Path):
+    assert git.untouched_since_created(fresh_worktree(repo)) is True
+
+
+def test_a_commit_inside_is_not_untouched(repo: Path):
+    path = fresh_worktree(repo)
+    git.run(["commit", "-q", "--allow-empty", "-m", "inside"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_checkout_inside_is_not_untouched(repo: Path):
+    first = git.rev_parse(repo, "main")
+    git.run(["commit", "-q", "--allow-empty", "-m", "second"], cwd=repo)
+    path = fresh_worktree(repo, first)
+    git.run(["checkout", "-q", "--detach", "main"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_worktree_ref_is_not_untouched(repo: Path):
+    path = fresh_worktree(repo)
+    git.run(["update-ref", "refs/worktree/keep", "HEAD"], cwd=path)
+    assert git.untouched_since_created(path) is False
+
+
+def test_no_reflog_is_not_untouched(repo: Path):
+    git.run(["config", "core.logAllRefUpdates", "false"], cwd=repo)
+    assert git.untouched_since_created(fresh_worktree(repo)) is False
+
+
+def test_a_commit_whose_creation_entry_expired_is_not_untouched(repo: Path):
+    # gc expires old reflog entries: a tree made long ago with one commit
+    # since is left with a single line that is not its creation.
+    path = fresh_worktree(repo)
+    git.run(["commit", "-q", "--allow-empty", "-m", "inside"], cwd=path)
+    log = git.git_dir(path) / "logs" / "HEAD"
+    log.write_text(log.read_text().splitlines(keepends=True)[-1])
+    assert git.untouched_since_created(path) is False
+
+
+def test_a_worktree_made_with_a_new_branch_is_untouched(repo: Path):
+    path = repo.parent / "branched"
+    git.run(["worktree", "add", "-q", "-b", "agent", str(path)], cwd=repo)
+    assert git.untouched_since_created(path) is True

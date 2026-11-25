@@ -241,10 +241,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="return a slot to the pool",
         description="Park the slot holding BRANCH back on base with a "
         "detached HEAD and mark it ready, keeping its installed dependencies. "
-        "Refuses a dirty tree, and a slot another still-running session took, "
-        "unless --force. Deletes the branch only if it is merged; an unmerged "
-        "branch, and the base branch, are always kept. An adopted worktree's "
-        "folder moves into the pool now.",
+        "Refuses a dirty tree, a paused bisect, rebase, or merge, a slot "
+        "switched to another branch or holding commits on a detached HEAD "
+        "that no branch holds, and a slot another still-running session "
+        "took, unless --force. Deletes the branch only if it is "
+        "merged; an unmerged branch, and the base branch, are always kept. "
+        "An adopted worktree's folder moves into the pool now.",
     )
     release.add_argument("branch", help="branch currently checked out in the slot")
     release.add_argument(
@@ -286,8 +288,12 @@ def build_parser() -> argparse.ArgumentParser:
         "and adopt-then-release hand-made worktrees whose branch is merged, "
         "folding their folders and dependencies into the pool. Dirty trees, "
         "unmerged branches, and slots other sessions hold are skipped with "
-        "a reason. Squash-merged branches are not detected: their commits "
-        "are not ancestors of base. With --detached, clean hand-made "
+        "a reason. A taken slot whose branch was squash-merged (its whole "
+        "change is one commit on base) is released too, and the branch "
+        "kept. Worktrees a tool made inside a slot are removed when nothing "
+        "was done in them since they were made and they pass the checks "
+        "below; the rest are listed, and a merged slot still holding one "
+        "is not released. With --detached, clean hand-made "
         "worktrees parked on a detached HEAD whose commit is an ancestor "
         "of base are removed, unless they are locked, mid-operation, hold "
         "commits or nested repositories only they have, hold ignored files "
@@ -736,13 +742,17 @@ def print_sweep_plan(results: list) -> None:
         for item in items:
             held = item.branch if item.branch is not None else "detached"
             if group == "clean":
-                print(f"  {SWEEP_VERBS[item.action]} {item.name} ({held})")
+                line = f"  {SWEEP_VERBS[item.action]} {item.name} ({held})"
+                if item.reason not in ("merged", "detached, merged"):
+                    line += f": {item.reason}"  # a squash merge or a nested tree
+                print(line)
             else:
                 print(f"  {item.name} ({held}): {item.reason}")
         if group == "in-flight" and any(i.reason == "not merged" for i in items):
             print(
-                "  (squash-merged branches look unmerged to git and show here; "
-                "release those yourself)"
+                "  (squash-merged branches show here when the squash was "
+                "edited while merging, or when the worktree is not a slot; "
+                "release those yourself once you confirm)"
             )
     if not results:
         print("nothing to sweep")
@@ -761,14 +771,21 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     for item in results:
         if item.action in ("released", "folded"):
             folded += 1
-            print(f"{item.action}: {item.name} ({item.branch})")
+            line = f"{item.action}: {item.name} ({item.branch})"
+            if item.reason != "merged":
+                line += f": {item.reason}"  # a squash merge; the branch stays
+            print(line)
         elif item.action == "removed":
             removed += 1
             print(f"removed: {item.name} ({item.reason})")
         elif item.action == "skipped":
             held = item.branch if item.branch is not None else "detached"
             note(f"skipped {item.name} ({held}): {item.reason}")
-        elif item.action == "kept" and item.reason.startswith("detached HEAD, merged"):
+        elif item.action == "kept" and (
+            item.reason.startswith("detached HEAD, merged")
+            or item.reason.startswith("nested in ")
+            or ", but nested worktree " in item.reason
+        ):
             note(f"kept {item.name}: {item.reason}")
     kept = sum(1 for item in results if item.action == "kept")
     skipped = sum(1 for item in results if item.action == "skipped")
