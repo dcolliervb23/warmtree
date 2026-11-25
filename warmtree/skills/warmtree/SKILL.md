@@ -168,11 +168,13 @@ abandoned.
 | `warmtree: fatal: not a git repository` | You are outside the repo. | `cd` into the repo or any of its worktrees. |
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
+| `slot-N has <a detached HEAD or another branch> checked out, not <branch>` | Someone moved the slot off its branch; releasing would bury anything committed there. | Tell the user what is checked out; never add `--force` on your own. |
 | `slot-N is held by process <pid>` | Another live session took that slot. | Release from that session, wait for it to exit, or ask the user about `--force`. |
 | `<branch> is already taken in slot-N` | A repeat take; the printed path is that existing slot. | Use the path. If the note names another live process, coordinate before working there. |
 | `kept <path>: detached HEAD, merged, but <reason>` | `sweep` found work in a detached checkout and will not delete it. | Tell the user the reason; they decide what to keep. |
 | `released: <slot> (<branch>): squash-merged as <sha>; branch kept` | `sweep` found the branch's whole change on base as one squashed commit and freed the slot; the branch stays. | Nothing. Ask the user before deleting the branch (`git branch -D`), since its own commits are not on base. |
 | `kept <path>: nested in <slot>, but <reason>` | A worktree inside that slot (often one a tool made) may hold work, so `sweep` kept it; a merged slot holding it stays taken. | Tell the user the reason; they decide whether to remove it. Never remove it yourself. |
+| `kept slot-N: <merged or squash-merged>, but nested worktree <path> <reason>` | The slot's branch landed, but a worktree inside it must stay, so the slot stays taken. | Tell the user about the nested worktree; once it is gone, `sweep` releases the slot. |
 | `skipped <slot> (<branch>): <git error>` | Releasing that slot failed; sweep moved on to the rest. | Show the user the error; retry `warmtree release <branch>` once it is fixed. |
 | ``slot-N is no longer a working tree of this repository; run `warmtree doctor` `` or `slot-N directory is missing` | The slot's folder was deleted or replaced outside warmtree. | Run `warmtree doctor` and show the user its report; ask before `--fix`. |
 | `kept branch <x>: it has commits that are not merged` or `kept branch <x>: it is the base branch` | `release` returned the slot but kept the branch on purpose. | Nothing; never delete the branch yourself. Ask the user before deleting an unmerged branch. |
@@ -215,10 +217,10 @@ at: "would clean up" is what a real sweep will do; "needs you" lists
 worktrees only the user can settle, such as uncommitted changes, commits no
 branch holds, an `.env`, or a paused bisect; "still in flight" is normal
 work. Show the user the "needs you" list and leave those trees alone: never
-discard work to make sweep take them. Sweep recognizes a squash merge when
-base holds the branch's exact change; one edited while merging still looks
-unmerged and stays in flight, so release it only once the user confirms it
-is merged. Worktrees your tools create inside a slot are removed by sweep
+discard work to make sweep take them. For taken slots, sweep recognizes a
+squash merge when base holds the branch's exact change (hand-made worktrees
+still need a real merge); one edited while merging still looks unmerged and
+stays in flight, so release it only once the user confirms it is merged. Worktrees your tools create inside a slot are removed by sweep
 only when idle and untouched since they were made; never leave work in one
 expecting it to survive, and never delete one that sweep kept. `--detached` deletes detached checkouts rather than folding
 them; add it only when the user asks to remove old detached checkouts.

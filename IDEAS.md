@@ -104,3 +104,21 @@ Append here instead of expanding DESIGN.md.
   next time, so they wait until it is fixed. Older than #29 and the same
   for copy and run failures. A fix would collect per-slot errors, finish
   the loop, and report them together. Found by the review of #29 (2026-11).
+
+- **Sweep gaps found reviewing PR #30 (left alone, all keep rather than
+  delete, except the first).**
+  - A hand-made file inside a wholly ignored rebuildable folder (`build/.env`
+    with `build/` ignored) shows only as `!! build/`, so the `--detached` and
+    nested-tree checks treat it as rebuildable and remove it. Older than #30;
+    #30 applies the check in default sweep for nested trees. Fix by walking
+    rebuildable folders for files that are not build output, or narrow the
+    README's "an `.env`, even inside `build/`" promise.
+  - The dry run predicts "skipped: uncommitted changes" for a merged slot
+    whose removable nested tree sits in a folder the repo does not ignore;
+    the real run removes the tree first and then releases the slot.
+  - Squash detection misses a branch named like a top-level path (`docs`:
+    "ambiguous argument") and single-file branches under `log.follow=true`.
+    Pass `refs/heads/<branch>` and `-c log.follow=false`.
+  - Three squash tests pass without the flag they name (`-U0`,
+    `--full-index`, `--no-ext-diff`/`--no-textconv`), and `--no-renames` has
+    no test.

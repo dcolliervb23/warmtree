@@ -87,8 +87,8 @@ def test_an_empty_net_change_is_not_found(repo: Path):
 
 
 def test_a_different_binary_change_does_not_match(repo: Path):
-    # The same text edit with different bytes in a binary file: without the
-    # binary contents both diffs read "Binary files differ" and look alike.
+    # The same text edit with different bytes in a binary file. Both diffs
+    # read "Binary files differ"; patch-id tells them apart by object id.
     commit(repo, "blob.bin", b"\x00start", "binary file")
     run_git("checkout", "-q", "-b", "feat", cwd=repo)
     (repo / "blob.bin").write_bytes(b"\x00B")

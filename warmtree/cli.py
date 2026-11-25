@@ -241,10 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="return a slot to the pool",
         description="Park the slot holding BRANCH back on base with a "
         "detached HEAD and mark it ready, keeping its installed dependencies. "
-        "Refuses a dirty tree, and a slot another still-running session took, "
-        "unless --force. Deletes the branch only if it is merged; an unmerged "
-        "branch, and the base branch, are always kept. An adopted worktree's "
-        "folder moves into the pool now.",
+        "Refuses a dirty tree, a slot whose HEAD is no longer on BRANCH (a "
+        "detached HEAD or another branch), and a slot another still-running "
+        "session took, unless --force. Deletes the branch only if it is "
+        "merged; an unmerged branch, and the base branch, are always kept. "
+        "An adopted worktree's folder moves into the pool now.",
     )
     release.add_argument("branch", help="branch currently checked out in the slot")
     release.add_argument(
@@ -748,8 +749,9 @@ def print_sweep_plan(results: list) -> None:
                 print(f"  {item.name} ({held}): {item.reason}")
         if group == "in-flight" and any(i.reason == "not merged" for i in items):
             print(
-                "  (a branch squash-merged with edits looks unmerged and "
-                "shows here; release those yourself once you confirm)"
+                "  (squash-merged branches show here when the squash was "
+                "edited while merging, or when the worktree is not a slot; "
+                "release those yourself once you confirm)"
             )
     if not results:
         print("nothing to sweep")
