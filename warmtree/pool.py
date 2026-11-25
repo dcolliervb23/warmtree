@@ -634,7 +634,10 @@ class Pool:
             are kept: their own commits are not on base."""
             if merged(branch):
                 return "merged"
-            sha = git.squash_landed(self.repo_root, branch, base_ref)
+            try:
+                sha = git.squash_landed(self.repo_root, branch, base_ref)
+            except git.GitError:
+                return None  # e.g. the branch was deleted; not proven landed
             if sha is not None:
                 return f"squash-merged as {sha}; branch kept"
             return None
