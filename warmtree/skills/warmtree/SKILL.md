@@ -163,7 +163,8 @@ abandoned.
 | Symptom | Meaning | Do this |
 |---|---|---|
 | `stale` in `warmtree status` | The last warm failed in that slot. | `warmtree refresh` retries and prints the failing command's output. |
-| `could not copy <name> into the slot: <error>` | A `copy` file could not be written into that slot; it is marked stale. | Show the user the error; `warmtree refresh` retries once it is fixed. |
+| `[warm] copy entries must be paths inside the repo: '<entry>'` | `.warmtree.toml` lists an absolute or `..` path under `copy`, which could write outside a slot. | Tell the user; only they should edit the config. |
+| `could not copy <name> into the slot: <error>` | A `copy` file could not be written into that slot (unreadable, not UTF-8, or its folder links outside the slot); the slot is marked stale. | Show the user the error; `warmtree refresh` retries once it is fixed. |
 | `warmtree: fatal: not a git repository` | You are outside the repo. | `cd` into the repo or any of its worktrees. |
 | `no taken slot has branch '<x>'` | That branch is not in a slot. | `warmtree status` shows which branches are. |
 | `slot-N has uncommitted changes` | `release` refused a dirty tree. | Commit or stash, or ask the user about `--force`. |
