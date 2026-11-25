@@ -244,6 +244,7 @@ def test_a_nested_tree_that_is_itself_a_slot_is_left_to_its_slot(repo: Path):
     exclude.write_text(exclude.read_text() + ".loop/\n")
     inner = outer / ".loop" / "agent"
     run_git("worktree", "add", "-q", "-b", "inner", str(inner), cwd=repo)
+    run_git("commit", "-q", "--allow-empty", "-m", "inner work", cwd=inner)
     pool.adopt(inner)
     idle(inner)
 
