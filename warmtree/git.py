@@ -167,7 +167,64 @@ def is_ancestor(repo: Path, ref: str, of: str) -> bool:
     return True
 
 
-_SHOW_ALL = ("--untracked-files=normal", "--ignore-submodules=none")
+# How squash_landed renders every diff it fingerprints. No context lines, so
+# base moving around a change does not alter it; full object ids, which
+# patch-id hashes for a binary file in place of its contents, so two
+# different binary edits never look alike; and fixed choices for every
+# option a user's config could otherwise change on one side only.
+_FINGERPRINT_DIFF = (
+    "-U0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--full-index",
+)
+
+
+def squash_landed(repo: Path, branch: str, base_ref: str) -> str | None:
+    """The short sha of the commit on base that holds the branch's change.
+
+    A squash merge puts a branch's whole change on base as one new commit,
+    so the branch is never an ancestor of base. Its fingerprint (patch-id)
+    still equals that commit's: the diff from the merge base to the branch
+    tip is the same change. Only commits after the merge base that touch
+    the branch's files are compared. None when no commit matches, which
+    includes a squash edited while merging and a branch with work after it.
+    """
+    merge_base = run(["merge-base", branch, base_ref], cwd=repo)
+    names = run(["diff", "--name-only", "-z", merge_base, branch], cwd=repo)
+    paths = [name for name in names.split("\0") if name]
+    if not paths:
+        return None
+    change = run(["diff", *_FINGERPRINT_DIFF, merge_base, branch], cwd=repo)
+    wanted = run(["patch-id", "--stable"], cwd=repo, stdin=change + "\n").split()
+    if not wanted:
+        return None
+    history = run(
+        [
+            "log",
+            "-p",
+            *_FINGERPRINT_DIFF,
+            "--full-diff",
+            "--format=commit %H",
+            f"{merge_base}..{base_ref}",
+            "--",
+            *paths,
+        ],
+        cwd=repo,
+    )
+    if not history:
+        return None
+    found = run(["patch-id", "--stable"], cwd=repo, stdin=history + "\n")
+    for line in found.splitlines():
+        patch_id, commit = line.split()
+        if patch_id == wanted[0]:
+            return run(["rev-parse", "--short", commit], cwd=repo)
+    return None
+
+
+_SHOW_ALL =("--untracked-files=normal", "--ignore-submodules=none")
 
 
 def is_dirty(path: Path) -> bool:
