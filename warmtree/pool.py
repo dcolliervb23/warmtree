@@ -587,11 +587,13 @@ class Pool:
         worktrees on merged branches are adopted and released in one
         motion, so their folders and dependencies join the pool. Dirty
         trees, unmerged branches, slots other live sessions hold, and
-        anything that is not ours are skipped with a reason. Squash-merged
-        branches are not detected: their commits are not ancestors of base.
-        A hand-made worktree parked on a detached HEAD that is an ancestor
-        of base is reported with a hint; with detached=True the clean ones
-        are removed outright — there is no branch to lose.
+        anything that is not ours are skipped with a reason. A taken slot
+        whose branch landed through a squash merge (its whole change is one
+        commit on base) is released too, and its branch kept; hand-made
+        worktrees still need git's merged certificate. A hand-made worktree
+        parked on a detached HEAD that is an ancestor of base is reported
+        with a hint; with detached=True the clean ones are removed
+        outright — there is no branch to lose.
 
         With dry_run=True nothing in the pool or any worktree changes (fetch
         still updates origin's refs); the results say what a real sweep
@@ -609,6 +611,16 @@ class Pool:
         def merged(branch: str) -> bool:
             return git.is_ancestor(self.repo_root, branch, base_ref)
 
+        def landed(branch: str) -> str | None:
+            """Why a slot's branch is done, or None. Squash-landed branches
+            are kept: their own commits are not on base."""
+            if merged(branch):
+                return "merged"
+            sha = git.squash_landed(self.repo_root, branch, base_ref)
+            if sha is not None:
+                return f"squash-merged as {sha}; branch kept"
+            return None
+
         def slots() -> list[Slot]:
             # status() takes the pool lock, which creates the pool directory;
             # with no state file there are no slots, and a dry run must not
@@ -621,20 +633,24 @@ class Pool:
             if slot.branch == base_branch:
                 results.append(Swept(slot.name, slot.branch, "kept", BASE_REASON))
                 continue
-            if not merged(slot.branch):
+            why = landed(slot.branch)
+            if why is None:
                 results.append(Swept(slot.name, slot.branch, "kept", "not merged"))
                 continue
             if dry_run:
                 refusal = self._release_refusal(slot)
                 if refusal is None:
-                    results.append(Swept(slot.name, slot.branch, "released", "merged"))
+                    results.append(Swept(slot.name, slot.branch, "released", why))
                 else:
                     results.append(Swept(slot.name, slot.branch, "skipped", refusal))
                 continue
             try:
-                self.release(slot.branch)
-                self._certified_delete(slot.branch)
-                results.append(Swept(slot.name, slot.branch, "released", "merged"))
+                if why == "merged":
+                    self.release(slot.branch)
+                    self._certified_delete(slot.branch)
+                else:
+                    self.release(slot.branch, keep_branch=True)
+                results.append(Swept(slot.name, slot.branch, "released", why))
             except (PoolError, git.GitError) as exc:
                 results.append(Swept(slot.name, slot.branch, "skipped", str(exc)))
 
