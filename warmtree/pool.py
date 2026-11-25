@@ -571,6 +571,12 @@ class Pool:
                     f"holds, not {slot.branch}; put them on a branch, or use "
                     "--force"
                 )
+        operation = git.operation_in_progress(path)
+        if not force and operation is not None:
+            return (
+                f"{slot.name} has a {operation} in progress; finish or abort "
+                "it, or use --force"
+            )
         if not force and git.is_dirty(path):
             return (
                 f"{slot.name} has uncommitted changes; commit or stash them, "
@@ -676,14 +682,22 @@ class Pool:
 
         worktrees = git.worktree_list(self.repo_root)
         claimed: set[Path] = set()  # nested trees, kept out of the hand-made pass
-        homes = {Path(s.path).resolve() for s in slots()}
+        homes = {Path(s.path).resolve(): s.name for s in slots()}
         for slot in slots():
             home = Path(slot.path).resolve()
-            # A tree that is itself a slot is that slot's business.
+            # A tree that is itself a slot is that slot's business, but it
+            # still keeps this slot: releasing would reset or move it.
             trees = [p for p in worktrees if p not in homes and p.is_relative_to(home)]
+            inner = [
+                name
+                for path, name in homes.items()
+                if path != home and path.is_relative_to(home)
+            ]
             claimed.update(trees)
             found, stays = self._sweep_nested(slot, trees, dry_run)
             results.extend(found)
+            if inner:
+                stays = f"holds {', '.join(inner)}"
             if slot.state != "taken" or slot.branch is None:
                 continue
             if slot.branch == base_branch:
