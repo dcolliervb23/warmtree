@@ -54,7 +54,10 @@ the change is meant to do, a scratch folder for experiments, and the mode.
   which commit, and every finding left alone with the reason.
 
 ## Publishing hygiene
-- `git config user.email dcolliervb23@users.noreply.github.com` in this repo. Never a personal email.
+- Maintainer only: commits by the maintainer use
+  `git config user.email dcolliervb23@users.noreply.github.com` in this repo,
+  never a personal email. Contributors commit under their own identity; a
+  GitHub noreply address keeps a personal email out of the public history.
 - No secrets. PyPI publishing is GitHub Actions trusted publishing only.
 - No local machine paths in any committed file.
 - Assume every commit is public.
